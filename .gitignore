@@ -1,0 +1,21 @@
+node_modules/
+dist/
+lib/
+coverage/
+.cache/
+.temp/
+tmp/
+*.log
+*.tsbuildinfo
+*.tgz
+.env
+.env.*
+!.env.example
+
+# Reproducible local runtime and index data
+fixtures/temp/
+fixtures/**/dsh-home/
+data/
+indexes/
+models/
+.dsh-rag-public-*

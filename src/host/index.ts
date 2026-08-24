@@ -1,24 +1,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import path from 'node:path'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, freezeMessage, MessageId } from '@deepseek-ai/dsh-llm'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { z } from 'zod'
 import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-host-webserver'
-import type {} from '@deepseek-ai/dsh-session-projection'
-
-declare module '@deepseek-ai/dsh-session/types' {
-  interface SessionEventMap {
-    'dsh-rag/retrieval': {
-      readonly result: SearchResult
-      readonly knowledgeBaseNames: readonly string[]
-    }
-  }
-}
 
 import { SingleTurnActivationGate } from '../core/activation-gate.ts'
 import { formatKnowledgeBaseSelector, parseDshRagCommandInput } from '../core/command-input.ts'
@@ -28,12 +17,11 @@ import { renderRetrievalContext } from '../core/retrieval-context.ts'
 import { SystemCredentialVault } from './credential-vault.ts'
 import { RuntimeProviderCredential } from './provider-credential.ts'
 import { ProviderSettingsStore } from './provider-settings.ts'
-import { SiliconFlowProvider } from './siliconflow-provider.ts'
-import {
-  foldKnowledgeSelection,
-  normalizeKnowledgeBaseIds,
-  type KnowledgeSelectionProjection,
-} from './selection.ts'
+import { SiliconFlowProvider, type ProviderProbeResult, type ProviderProbeStatus } from './siliconflow-provider.ts'
+import { prepareRuntimeStorage } from './storage-migration.ts'
+import { resolveRuntimeStorage } from './storage-path.ts'
+import { normalizeKnowledgeBaseIds } from './selection.ts'
+import { SessionStateStore } from './session-state-store.ts'
 
 export * from '../core/activation-gate.ts'
 export * from '../core/bm25.ts'
@@ -53,12 +41,20 @@ export * from './siliconflow-provider.ts'
 export * from './credential-vault.ts'
 export * from './provider-credential.ts'
 export * from './provider-settings.ts'
+export * from './session-state-store.ts'
 
 export const name = '@kai232/dsh-rag'
 export const inject = ['tools']
 
 const credential = credentialRef('SILICONFLOW_API_KEY')
-const projectionSchema = z.object({ selectedKnowledgeBaseIds: z.array(z.string()) })
+
+type ProviderHealthStatus = 'checking' | 'connected' | 'unconfigured' | 'invalid-credential' | 'unavailable'
+
+interface ProviderHealthState {
+  readonly status: ProviderHealthStatus
+  readonly checkedAt?: string
+  readonly probe?: ProviderProbeResult
+}
 
 function writeJson(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, {
@@ -88,31 +84,48 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
 }
 
-function runtimeStoragePath(): string {
-  const explicit = process.env.DSH_RAG_DATA_DIR?.trim()
-  if (explicit !== undefined && explicit !== '') return path.resolve(explicit)
-  const home = process.env.DSH_HOME?.trim()
-  if (home !== undefined && home !== '') return path.join(path.resolve(home), 'dsh-rag')
-  return path.join(process.cwd(), '.dsh-rag')
-}
-
-export function setSelectedKnowledgeBases(agent: Agent, ids: readonly string[]): string[] {
-  const knowledgeBaseIds = normalizeKnowledgeBaseIds(ids)
-  agent.session.append('dsh-rag/selection', { knowledgeBaseIds })
-  return knowledgeBaseIds
-}
-
-export function apply(ctx: Context): void {
+export async function apply(ctx: Context): Promise<void> {
   const activations = new SingleTurnActivationGate<Agent, SearchResult>()
   const vault = new SystemCredentialVault()
   const providerCredential = new RuntimeProviderCredential(vault)
-  const storagePath = runtimeStoragePath()
+  const storagePreparation = await prepareRuntimeStorage(resolveRuntimeStorage())
+  const storagePath = storagePreparation.path
+  const sessionState = new SessionStateStore(storagePath)
   const providerSettings = ProviderSettingsStore.at(storagePath)
   const initialProviderSettings = providerSettings.get()
+  let providerHealth: ProviderHealthState = { status: 'checking' }
+  const healthStatus = (status: ProviderProbeStatus): ProviderHealthStatus => {
+    if (status === 'ok') return 'connected'
+    if (status === 'unconfigured') return 'unconfigured'
+    if (status === 'auth') return 'invalid-credential'
+    return 'unavailable'
+  }
+  const reportProviderStatus = (status: ProviderProbeStatus): void => {
+    providerHealth = { status: healthStatus(status), checkedAt: new Date().toISOString() }
+  }
   const provider = new SiliconFlowProvider({
     apiKey: async () => await providerCredential.resolve(),
     ...initialProviderSettings,
+    onStatus: reportProviderStatus,
   })
+  const refreshProviderHealth = async (): Promise<ProviderHealthState> => {
+    providerHealth = { status: 'checking' }
+    if (!(await providerCredential.describe()).configured) {
+      providerHealth = { status: 'unconfigured', checkedAt: new Date().toISOString() }
+      return providerHealth
+    }
+    const probe = await provider.probe(AbortSignal.timeout(10_000))
+    const statuses = [probe.embedding.status, probe.rerank.status]
+    const status = probe.ok
+      ? 'connected'
+      : statuses.includes('auth')
+        ? 'invalid-credential'
+        : statuses.includes('unconfigured')
+          ? 'unconfigured'
+          : 'unavailable'
+    providerHealth = { status, checkedAt: new Date().toISOString(), probe }
+    return providerHealth
+  }
   const knowledge = new KnowledgeService(storagePath, {
     embeddingProvider: provider,
     rerankProvider: provider,
@@ -127,50 +140,53 @@ export function apply(ctx: Context): void {
     return decision
   })
 
-  ctx.inject(['sessionProjections'], projectionCtx => {
-    projectionCtx.sessionProjections.register<'dsh-rag', KnowledgeSelectionProjection>({
-      key: 'dsh-rag',
-      stateSchema: projectionSchema,
-      init: () => ({ selectedKnowledgeBaseIds: [] }),
-      apply: (state, event) => {
-        if (event.type !== 'dsh-rag/selection') return state
-        return { selectedKnowledgeBaseIds: normalizeKnowledgeBaseIds(event.data.knowledgeBaseIds) }
-      },
-      wire: {
-        viewSchema: projectionSchema,
-        view: state => state,
-      },
-      stateVersion: 1,
-    })
-  })
-
   ctx.inject(['commands'], commandCtx => {
     commandCtx.commands.register({
-      name: 'dsh-rag',
-      description: '检索当前 Session 允许的知识库；可用 @"知识库名" 临时指定范围',
-      input: { hint: '[@"知识库名"] <问题>' },
-      handler: async ({ agent, rawInput, signal }) => {
+      name: 'rag',
+      description: '显示知识库概况，或检索当前 Session/本轮指定的知识库',
+      input: { hint: '[@知识库名] <问题>' },
+      handler: async ({ agent, commandId, rawInput, signal }) => {
         const parsed = parseDshRagCommandInput(rawInput)
         const question = parsed.question
-        if (question === '') return { kind: 'error', text: '请输入要检索的问题。' }
         const knowledgeBases = await knowledge.listKnowledgeBases()
+        await sessionState.rememberParent(String(agent.session.id), agent.session.header.parentSession === undefined ? undefined : String(agent.session.header.parentSession))
+        if (rawInput.trim() === '') {
+          const selectedIds = await sessionState.getSelection(String(agent.session.id))
+          const selectedNames = knowledgeBases.filter(item => selectedIds.includes(item.id)).map(item => item.name)
+          const documents = knowledgeBases.reduce((total, item) => total + item.documentCount, 0)
+          const chunks = knowledgeBases.reduce((total, item) => total + item.chunkCount, 0)
+          return {
+            kind: 'success',
+            text: `知识库：${knowledgeBases.length} 个，${documents} 份文档，${chunks} 个分块。\n当前会话：${selectedNames.length === 0 ? '未选择知识库' : selectedNames.join('、')}。\n使用：/rag <问题>；临时指定：/rag @知识库名 <问题>（名称含空格时加引号）。`,
+          }
+        }
+        if (question === '') return { kind: 'error', text: '请输入要检索的问题。' }
         const byName = new Map(knowledgeBases.map(item => [item.name, item]))
         const unknownNames = parsed.knowledgeBaseNames.filter(item => !byName.has(item))
         if (unknownNames.length > 0) {
-          return { kind: 'error', text: `找不到知识库：${unknownNames.join('、')}。请从 @ 菜单重新选择。` }
+          return { kind: 'error', text: `找不到知识库：${unknownNames.join('、')}。请输入 /rag 并从第一次命令提示中选择。` }
         }
         const selected = parsed.knowledgeBaseNames.length > 0
           ? parsed.knowledgeBaseNames.map(item => byName.get(item)?.id).filter((id): id is string => id !== undefined)
-          : foldKnowledgeSelection(agent.session.events)
+          : await sessionState.getSelection(String(agent.session.id))
         if (selected.length === 0) {
-          return { kind: 'error', text: '请先在 Knowledge 中选择知识库，或输入 /dsh-rag 后用 @ 选择本轮知识库。' }
+          return { kind: 'error', text: '请输入 /rag 并从第一次命令提示中选择本轮知识库，或在 Knowledge 中设置会话范围。' }
         }
         const selectedNames = parsed.knowledgeBaseNames.length > 0
           ? parsed.knowledgeBaseNames
           : knowledgeBases.filter(item => selected.includes(item.id)).map(item => item.name)
         const result = await knowledge.search(selected, question, 5, signal)
         signal.throwIfAborted()
-        const retrievalEvent = agent.session.append('dsh-rag/retrieval', {
+        const visibleCommand = `/rag ${selectedNames.map(formatKnowledgeBaseSelector).join('')}${question}`
+        const message = freezeMessage({
+          id: MessageId(String(commandId)),
+          role: 'user' as const,
+          content: [{ type: 'text', text: visibleCommand }],
+          source: { kind: 'user' },
+        })
+        await sessionState.saveRetrieval({
+          commandId: String(commandId),
+          sessionId: String(agent.session.id),
           result,
           knowledgeBaseNames: selectedNames,
         })
@@ -178,18 +194,12 @@ export function apply(ctx: Context): void {
           content: [{ type: 'text', text: renderRetrievalContext(result, selectedNames) }],
           source: { kind: 'plugin', plugin: 'dsh-rag' },
         }))
-        const visibleCommand = `/dsh-rag ${selectedNames.map(formatKnowledgeBaseSelector).join('')}${question}`
-        const message = createUserMessage({
-          content: [{ type: 'text', text: visibleCommand }],
-          source: { kind: 'user' },
-        })
         activations.issue(agent, String(message.id), result)
         signal.throwIfAborted()
         agent.steer(message)
         return {
           kind: 'success',
           text: `已检索 ${selectedNames.length} 个知识库，找到 ${result.sources.length} 条来源，正在生成回答。`,
-          sourceEventSeq: retrievalEvent.seq,
         }
       },
     })
@@ -197,7 +207,7 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'knowledge_search',
-    description: 'Return the retrieval result already prepared by the current /dsh-rag turn.',
+    description: 'Return the retrieval result already prepared by the current /rag turn.',
     parameters: {
       query: { type: 'string', required: true, description: 'The user question to retrieve evidence for.' },
     },
@@ -209,7 +219,7 @@ export function apply(ctx: Context): void {
       const agent = exec.agent
       const claim = agent === undefined ? undefined : activations.consume(agent)
       if (claim === undefined) {
-        throw new Error('knowledge_search is only available once in the turn created by /dsh-rag')
+        throw new Error('knowledge_search is only available once in the turn created by /rag')
       }
       return JSON.stringify(claim.payload)
     },
@@ -226,6 +236,9 @@ export function apply(ctx: Context): void {
       render: (_args, value) => [{ type: 'text', text: value }],
     },
     async execute(args) {
+      const configured = await knowledge.listKnowledgeBases()
+      const current = configured.find(item => item.id === args.knowledgeBaseId)
+      if (current === undefined) throw new Error('knowledge base not found')
       const result = await knowledge.sync(args.knowledgeBaseId)
       await knowledge.startWatcher(args.knowledgeBaseId)
       return JSON.stringify(result)
@@ -244,7 +257,7 @@ export function apply(ctx: Context): void {
       const configured = await knowledge.listKnowledgeBases()
       const selectedKnowledgeBaseIds = exec.agent === undefined
         ? []
-        : foldKnowledgeSelection(exec.agent.session.events)
+        : await sessionState.getSelection(String(exec.agent.session.id))
       return JSON.stringify({
         selectedKnowledgeBaseIds,
         selectedKnowledgeBases: configured.filter(item => selectedKnowledgeBaseIds.includes(item.id)),
@@ -273,7 +286,7 @@ export function apply(ctx: Context): void {
           credential: {
             ...credentialStatus,
             writable: credentialStatus.osVaultWritable,
-            persistent: credentialStatus.source !== 'session' && credentialStatus.source !== 'none',
+            persistent: credentialStatus.source !== 'none',
             backend: credentialStatus.osVaultBackend,
             dshSource: info.source,
           },
@@ -311,6 +324,19 @@ export function apply(ctx: Context): void {
               capabilities: {
                 aiContext: { available: false, reason: 'release-quality-gate-failed' },
               },
+              health: providerHealth,
+            })
+            return
+          }
+          if (pathname === '/dsh-rag/api/v1/storage' && req.method === 'GET') {
+            writeJson(res, 200, {
+              ok: true,
+              path: storagePath,
+              source: storagePreparation.source,
+              migration: {
+                status: storagePreparation.status,
+                legacyPath: storagePreparation.legacyPath,
+              },
             })
             return
           }
@@ -323,6 +349,7 @@ export function apply(ctx: Context): void {
             const saved = await providerSettings.set(body)
             provider.configure(saved)
             knowledge.configureProviderModels(saved.embeddingModel)
+            const health = await refreshProviderHealth()
             writeJson(res, 200, {
               ok: true,
               endpoint: saved.endpoint,
@@ -330,22 +357,26 @@ export function apply(ctx: Context): void {
                 embedding: saved.embeddingModel,
                 rerank: saved.rerankModel,
               },
+              health,
             })
             return
           }
           if (pathname === '/dsh-rag/api/v1/provider/credential' && req.method === 'POST') {
-            const body = z.object({ apiKey: z.string().min(1).max(4096), persistence: z.enum(['os', 'session']) }).parse(await readJsonBody(req))
-            await providerCredential.set(body.apiKey, body.persistence)
-            writeJson(res, 200, { ok: true, credential: await providerCredential.describe() })
+            const body = z.object({ apiKey: z.string().min(1).max(4096) }).parse(await readJsonBody(req))
+            await providerCredential.set(body.apiKey)
+            writeJson(res, 200, { ok: true, credential: await providerCredential.describe(), health: await refreshProviderHealth() })
             return
           }
           if (pathname === '/dsh-rag/api/v1/provider/credential' && req.method === 'DELETE') {
             await providerCredential.delete()
-            writeJson(res, 200, { ok: true, credential: await providerCredential.describe() })
+            providerHealth = (await providerCredential.describe()).configured
+              ? await refreshProviderHealth()
+              : { status: 'unconfigured', checkedAt: new Date().toISOString() }
+            writeJson(res, 200, { ok: true, credential: await providerCredential.describe(), health: providerHealth })
             return
           }
-          if (pathname === '/dsh-rag/api/v1/provider/test' && req.method === 'POST') {
-            writeJson(res, 200, { ok: true, probe: await provider.probe() })
+          if (pathname === '/dsh-rag/api/v1/provider/health' && req.method === 'POST') {
+            writeJson(res, 200, { ok: true, health: await refreshProviderHealth() })
             return
           }
           if (pathname === '/dsh-rag/api/v1/knowledge-bases' && req.method === 'GET') {
@@ -360,15 +391,27 @@ export function apply(ctx: Context): void {
             writeJson(res, 201, { ok: true, knowledgeBase: created })
             return
           }
+          const sessionKnowledgeMatch = /^\/dsh-rag\/api\/v1\/sessions\/([^/]+)\/knowledge-bases$/u.exec(pathname)
+          if (sessionKnowledgeMatch !== null) {
+            const sessionId = SessionId(decodeURIComponent(sessionKnowledgeMatch[1] ?? ''))
+            const session = routeCtx.sessions.get(sessionId)
+            if (session === undefined) {
+              writeJson(res, 404, { ok: false, error: 'session-not-found' })
+              return
+            }
+            if (req.method === 'GET') {
+              writeJson(res, 200, {
+                ok: true,
+                knowledgeBases: await knowledge.listKnowledgeBases(),
+              })
+              return
+            }
+          }
           const knowledgeBaseMatch = /^\/dsh-rag\/api\/v1\/knowledge-bases\/([^/]+)$/u.exec(pathname)
           if (knowledgeBaseMatch !== null && req.method === 'DELETE') {
             const knowledgeBaseId = decodeURIComponent(knowledgeBaseMatch[1] ?? '')
             await knowledge.deleteKnowledgeBase(knowledgeBaseId)
-            for (const session of routeCtx.sessions.list()) {
-              const selected = foldKnowledgeSelection(session.events)
-              const next = selected.filter(id => id !== knowledgeBaseId)
-              if (next.length !== selected.length) session.append('dsh-rag/selection', { knowledgeBaseIds: next })
-            }
+            await sessionState.removeKnowledgeBase(knowledgeBaseId)
             writeJson(res, 200, { ok: true, originalFilesDeleted: false })
             return
           }
@@ -394,7 +437,8 @@ export function apply(ctx: Context): void {
               return
             }
             if (req.method === 'GET') {
-              writeJson(res, 200, { ok: true, selectedKnowledgeBaseIds: foldKnowledgeSelection(session.events) })
+              await sessionState.rememberParent(String(session.id), session.header.parentSession === undefined ? undefined : String(session.header.parentSession))
+              writeJson(res, 200, { ok: true, selectedKnowledgeBaseIds: await sessionState.getSelection(String(session.id)) })
               return
             }
             if (req.method === 'POST') {
@@ -404,10 +448,22 @@ export function apply(ctx: Context): void {
                 writeJson(res, 400, { ok: false, error: 'unknown-knowledge-base' })
                 return
               }
-              session.append('dsh-rag/selection', { knowledgeBaseIds: ids })
-              writeJson(res, 200, { ok: true, selectedKnowledgeBaseIds: ids })
+              const selectedKnowledgeBaseIds = await sessionState.setSelection(String(session.id), ids)
+              writeJson(res, 200, { ok: true, selectedKnowledgeBaseIds })
               return
             }
+          }
+          const retrievalMatch = /^\/dsh-rag\/api\/v1\/sessions\/([^/]+)\/retrievals\/([^/]+)$/u.exec(pathname)
+          if (retrievalMatch !== null && req.method === 'GET') {
+            const sessionId = decodeURIComponent(retrievalMatch[1] ?? '')
+            const commandId = decodeURIComponent(retrievalMatch[2] ?? '')
+            const record = await sessionState.getRetrieval(sessionId, commandId)
+            if (record === undefined) {
+              writeJson(res, 404, { ok: false, error: 'retrieval-not-found' })
+              return
+            }
+            writeJson(res, 200, { ok: true, retrieval: record })
+            return
           }
           const sourceMatch = /^\/dsh-rag\/api\/v1\/sources\/([^/]+)\/resolve$/u.exec(pathname)
           if (sourceMatch !== null && req.method === 'POST') {
@@ -421,4 +477,6 @@ export function apply(ctx: Context): void {
       },
     }), 'dsh-rag: M1 knowledge API')
   })
+
+  void refreshProviderHealth()
 }

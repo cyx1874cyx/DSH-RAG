@@ -11,7 +11,7 @@ function safeJson(value: unknown): string {
 
 /**
  * Build authoritative plugin context around untrusted retrieval data. The
- * evidence is retrieved before the model starts, so `/dsh-rag` never relies
+ * evidence is retrieved before the model starts, so `/rag` never relies
  * on the model deciding whether to call a tool.
  */
 export function renderRetrievalContext(result: SearchResult, knowledgeBaseNames: readonly string[]): string {

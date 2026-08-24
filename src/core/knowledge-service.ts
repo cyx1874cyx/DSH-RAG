@@ -47,6 +47,20 @@ interface ScanResult {
   readonly failedKeys: ReadonlySet<string>
 }
 
+interface PreviewKnowledgeBaseConfig extends KnowledgeBaseConfig {
+  readonly scope?: { readonly kind: 'user' } | {
+    readonly kind: 'workspace'
+    readonly workspaceId: string
+    readonly workspacePath: string
+  }
+}
+
+interface RetiredWorkspaceKnowledgeBases {
+  readonly schemaVersion: 1
+  readonly retiredAt: string
+  readonly knowledgeBases: readonly PreviewKnowledgeBaseConfig[]
+}
+
 interface SyncCheckpoint {
   readonly schemaVersion: 1
   readonly knowledgeBaseId: string
@@ -209,7 +223,38 @@ export class KnowledgeService {
   }
 
   private loadConfig(): Promise<KnowledgeConfig> {
-    this.configPromise ??= readJsonIfExists<KnowledgeConfig>(this.configPath).then(config => config ?? EMPTY_CONFIG)
+    this.configPromise ??= readJsonIfExists<{
+      readonly schemaVersion: 1 | 2
+      readonly knowledgeBases: readonly PreviewKnowledgeBaseConfig[]
+    }>(this.configPath).then(async stored => {
+      if (stored === undefined) return EMPTY_CONFIG
+      if (stored.schemaVersion !== 1 && stored.schemaVersion !== 2) throw new Error('unsupported knowledge config schema')
+      const retired = stored.knowledgeBases.filter(item => item.scope?.kind === 'workspace')
+      for (const item of retired) {
+        if (item.scope?.kind !== 'workspace' || item.scope.workspaceId.trim() === '' || !path.isAbsolute(item.scope.workspacePath)) {
+          throw new Error('invalid preview workspace knowledge-base scope')
+        }
+      }
+      if (retired.length > 0) {
+        const retiredPath = path.join(this.storagePath, 'retired-workspace-knowledge-bases.json')
+        const previous = await readJsonIfExists<RetiredWorkspaceKnowledgeBases>(retiredPath)
+        const byId = new Map((previous?.knowledgeBases ?? []).map(item => [item.id, item]))
+        for (const item of retired) byId.set(item.id, item)
+        await writeJsonAtomic(retiredPath, {
+          schemaVersion: 1,
+          retiredAt: previous?.retiredAt ?? new Date().toISOString(),
+          knowledgeBases: [...byId.values()],
+        } satisfies RetiredWorkspaceKnowledgeBases)
+      }
+      const knowledgeBases = stored.knowledgeBases
+        .filter(item => item.scope?.kind !== 'workspace')
+        .map(({ scope: _scope, ...item }) => item)
+      const config: KnowledgeConfig = { schemaVersion: 1, knowledgeBases }
+      if (stored.schemaVersion !== 1 || stored.knowledgeBases.some(item => item.scope !== undefined)) {
+        await writeJsonAtomic(this.configPath, config)
+      }
+      return config
+    })
     return this.configPromise
   }
 
@@ -236,7 +281,10 @@ export class KnowledgeService {
     return promise
   }
 
-  async createKnowledgeBase(nameInput: string, rootInputs: readonly string[]): Promise<KnowledgeBaseConfig> {
+  async createKnowledgeBase(
+    nameInput: string,
+    rootInputs: readonly string[],
+  ): Promise<KnowledgeBaseConfig> {
     const name = nameInput.trim()
     if (name === '') throw new Error('knowledge base name is required')
     const hasControlCharacter = [...name].some(character => {

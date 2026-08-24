@@ -55,6 +55,7 @@ export interface SiliconFlowProviderOptions {
   readonly rerankModel?: string
   readonly timeoutMs?: number
   readonly onUsage?: (usage: ProviderUsageEvent) => void
+  readonly onStatus?: (status: ProviderProbeStatus) => void
 }
 
 export interface ProviderUsageEvent {
@@ -151,6 +152,7 @@ export class SiliconFlowProvider implements EmbeddingProvider, RerankProvider, G
   private rerankModel: string
   private readonly timeoutMs: number
   private readonly onUsage: ((usage: ProviderUsageEvent) => void) | undefined
+  private readonly onStatus: ((status: ProviderProbeStatus) => void) | undefined
 
   constructor(options: SiliconFlowProviderOptions) {
     this.apiKey = options.apiKey
@@ -160,6 +162,7 @@ export class SiliconFlowProvider implements EmbeddingProvider, RerankProvider, G
     this.rerankModel = settings.rerankModel
     this.timeoutMs = options.timeoutMs ?? 60_000
     this.onUsage = options.onUsage
+    this.onStatus = options.onStatus
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
       throw new TypeError('timeoutMs must be a positive finite number')
     }
@@ -307,6 +310,7 @@ export class SiliconFlowProvider implements EmbeddingProvider, RerankProvider, G
     const rawKey = await this.apiKey()
     const key = rawKey?.trim()
     if (key === undefined || key === '') {
+      this.reportStatus('unconfigured')
       throw new ProviderError('SiliconFlow credential is not configured', 'UNCONFIGURED')
     }
     const timeout = AbortSignal.timeout(this.timeoutMs)
@@ -319,31 +323,49 @@ export class SiliconFlowProvider implements EmbeddingProvider, RerankProvider, G
           authorization: `Bearer ${key}`,
           'content-type': 'application/json',
           accept: 'application/json',
-          'user-agent': '@kai232/dsh-rag/0.1.1',
+          'user-agent': '@kai232/dsh-rag/0.1.2',
         },
         body: JSON.stringify(body),
         signal,
       })
     } catch (error) {
-      if (signal.aborted) throw new ProviderError('SiliconFlow request was aborted', 'ABORTED', { cause: error })
+      if (signal.aborted) {
+        // A user cancelling the current turn says nothing about provider health.
+        if (callerSignal?.aborted !== true) this.reportStatus('unavailable')
+        throw new ProviderError('SiliconFlow request was aborted', 'ABORTED', { cause: error })
+      }
+      this.reportStatus('unavailable')
       throw new ProviderError('SiliconFlow request failed before a response', 'UNAVAILABLE', { cause: error })
     }
     const requestId = response.headers.get('x-siliconcloud-trace-id') ?? undefined
     if (!response.ok) {
       const retryDelay = retryAfterMs(response.headers.get('retry-after'))
-      throw new ProviderError(`SiliconFlow request failed with HTTP ${response.status}`, statusCode(response.status), {
+      const error = new ProviderError(`SiliconFlow request failed with HTTP ${response.status}`, statusCode(response.status), {
         status: response.status,
         ...(retryDelay === undefined ? {} : { retryAfterMs: retryDelay }),
         ...(requestId === undefined ? {} : { requestId }),
       })
+      this.reportStatus(probeStatus(error))
+      throw error
     }
     try {
-      return await response.json()
+      const value = await response.json()
+      this.reportStatus('ok')
+      return value
     } catch (error) {
+      this.reportStatus('bad-response')
       throw new ProviderError('SiliconFlow returned non-JSON content', 'BAD_RESPONSE', {
         ...(requestId === undefined ? {} : { requestId }),
         cause: error,
       })
+    }
+  }
+
+  private reportStatus(status: ProviderProbeStatus): void {
+    try {
+      this.onStatus?.(status)
+    } catch {
+      // Health reporting must never change a provider request outcome.
     }
   }
 }

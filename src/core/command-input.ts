@@ -39,7 +39,7 @@ function readBareName(input: string): { readonly name: string; readonly rest: st
   return { name: match[1], rest: input.slice(match[0].length) }
 }
 
-/** Parse optional leading knowledge-base selectors from `/dsh-rag` arguments. */
+/** Parse optional leading knowledge-base selectors from `/rag` arguments. */
 export function parseDshRagCommandInput(rawInput: string): DshRagCommandInput {
   let rest = rawInput.trim()
   const names: string[] = []
@@ -55,7 +55,7 @@ export function parseDshRagCommandInput(rawInput: string): DshRagCommandInput {
   }
 }
 
-/** Produce a selector inserted by the Web `@` menu without ambiguous spaces. */
+/** Produce the shortest unambiguous selector inserted by the Web slash menu. */
 export function formatKnowledgeBaseSelector(name: string): string {
-  return `@${JSON.stringify(name)} `
+  return /^@?[^\s"\\]+$/u.test(name) ? `@${name.replace(/^@/u, '')} ` : `@${JSON.stringify(name)} `
 }

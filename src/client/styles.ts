@@ -38,7 +38,7 @@ export const DSH_RAG_STYLES = String.raw`
 .dsh-rag-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; }
 .dsh-rag-card-title { margin: 0; font: var(--dsw-font-base-strong-16, 600 16px/24px system-ui, sans-serif); }
 .dsh-rag-card-description { margin: 4px 0 0; color: var(--rag-text-3); font-size: 13px; line-height: 1.5; }
-.dsh-rag-state-badge { flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--rag-border-soft); border-radius: 999px; background: var(--rag-layer-1); color: var(--rag-text-2); padding: 4px 9px; font-size: 12px; }
+.dsh-rag-state-badge { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--rag-border-soft); border-radius: 999px; background: var(--rag-layer-1); color: var(--rag-text-2); padding: 4px 9px; font-size: 12px; }
 .dsh-rag-state-badge[data-tone="success"] { color: var(--rag-success); }
 .dsh-rag-state-badge[data-tone="warning"] { color: var(--rag-warning); }
 .dsh-rag-state-badge[data-tone="danger"] { color: var(--rag-danger); }
@@ -91,8 +91,13 @@ export const DSH_RAG_STYLES = String.raw`
 .dsh-rag-command strong { display: block; margin-bottom: 4px; }
 .dsh-rag-command p { margin: 0; color: var(--rag-text-3); font-size: 12px; }
 .dsh-rag-code { display: inline-block; border: 1px solid var(--rag-border); border-radius: 9px; background: var(--dsw-alias-markdown-code-block, var(--rag-bg)); color: var(--rag-text); padding: 6px 9px; font: var(--dsw-font-markdown-code-block-small, 12px/18px ui-monospace, monospace); white-space: nowrap; }
-.dsh-rag-tool { border: 1px solid var(--rag-border-soft); border-radius: 14px; background: var(--rag-bg); padding: 14px; margin: 4px; }
-.dsh-rag-tool-head { display: flex; align-items: center; gap: 8px; }
+.dsh-rag-tool { border: 1px solid var(--rag-border-soft); border-radius: 14px; background: color-mix(in srgb, var(--rag-layer-1) 82%, var(--rag-bg)); padding: 14px; margin: 4px; }
+.dsh-rag-tool[data-dsh-rag-surface="retrieval"] { border-color: color-mix(in srgb, var(--rag-accent) 10%, var(--rag-border-soft)); background: color-mix(in srgb, var(--rag-accent) 3%, var(--rag-layer-1)); }
+.dsh-rag-tool-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.dsh-rag-tool-head > div { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dsh-rag-tool-count { color: var(--rag-text-3); font-size: 12px; font-weight: 400; }
+.dsh-rag-link-button { border: 0; background: transparent; color: var(--rag-accent); cursor: pointer; flex: none; font: inherit; font-size: 12px; padding: 4px; }
+.dsh-rag-link-button:hover { text-decoration: underline; }
 .dsh-rag-tool-mode { color: var(--rag-text-3); margin: 6px 0 0; font-size: 12px; }
 .dsh-rag-source { border-top: 1px solid var(--rag-border-soft); padding: 14px 0 2px; margin-top: 12px; }
 .dsh-rag-source-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -100,6 +105,8 @@ export const DSH_RAG_STYLES = String.raw`
 .dsh-rag-source-meta { color: var(--rag-text-3); margin-top: 4px; font-size: 12px; }
 .dsh-rag-context { color: var(--rag-text-2); margin: 10px 0 0; font-size: 13px; }
 .dsh-rag-snippet { border-left: 2px solid var(--rag-border); color: var(--rag-text-2); margin: 10px 0; padding-left: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.dsh-rag-locator-panel { border: 1px solid var(--rag-border); border-radius: 12px; background: var(--rag-layer-2); box-shadow: 0 10px 28px color-mix(in srgb, #000 14%, transparent); margin-top: 12px; padding: 12px; }
+.dsh-rag-locator-text { color: var(--rag-text); background: var(--rag-layer-1); border: 1px solid var(--rag-border-soft); border-radius: 8px; font: inherit; line-height: 1.55; margin: 8px 0; max-height: 240px; overflow: auto; padding: 10px; white-space: pre-wrap; }
 .dsh-rag-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 @media (max-width: 720px) {
   .dsh-rag-page { padding: 22px 18px 36px; }

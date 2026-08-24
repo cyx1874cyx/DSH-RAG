@@ -1,4 +1,4 @@
-import type { RerankProvider } from './provider.ts'
+import { isAbortError, throwIfAborted, type RerankProvider } from './provider.ts'
 
 export interface RankedCandidate {
   readonly id: string
@@ -36,6 +36,7 @@ export async function rerankWithFallback(
   limit: number,
   signal?: AbortSignal,
 ): Promise<RerankOutcome> {
+  throwIfAborted(signal)
   if (provider === undefined || candidates.length === 0) return { ranking: fallback.slice(0, limit), reranked: false }
   try {
     const scores = await provider.rerank(query, candidates.map(candidate => candidate.text), Math.min(limit, candidates.length), signal)
@@ -44,7 +45,9 @@ export async function rerankWithFallback(
       score: result.score,
     })).filter(candidate => candidate.id !== '')
     return ranking.length === 0 ? { ranking: fallback.slice(0, limit), reranked: false } : { ranking, reranked: true }
-  } catch {
+  } catch (error) {
+    throwIfAborted(signal)
+    if (isAbortError(error)) throw error
     return { ranking: fallback.slice(0, limit), reranked: false }
   }
 }

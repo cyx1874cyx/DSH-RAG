@@ -1,0 +1,14 @@
+* text=auto
+
+# Frozen evaluation material and text fixtures must keep byte-stable LF endings.
+eval/*.json text eol=lf
+eval/*.jsonl text eol=lf
+eval/SHA256SUMS text eol=lf
+fixtures/**/*.md text eol=lf
+fixtures/**/*.txt text eol=lf
+fixtures/**/SHA256SUMS text eol=lf
+
+# Binary fixtures must never receive line-ending conversion.
+fixtures/**/*.docx binary
+fixtures/**/*.pdf binary
+fixtures/**/*.pptx binary

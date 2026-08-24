@@ -11,8 +11,20 @@ import type {} from '@deepseek-ai/dsh-commands'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-session-projection'
 
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'dsh-rag/retrieval': {
+      readonly result: SearchResult
+      readonly knowledgeBaseNames: readonly string[]
+    }
+  }
+}
+
 import { SingleTurnActivationGate } from '../core/activation-gate.ts'
+import { formatKnowledgeBaseSelector, parseDshRagCommandInput } from '../core/command-input.ts'
 import { KnowledgeService } from '../core/knowledge-service.ts'
+import type { SearchResult } from '../core/knowledge-types.ts'
+import { renderRetrievalContext } from '../core/retrieval-context.ts'
 import { SystemCredentialVault } from './credential-vault.ts'
 import { RuntimeProviderCredential } from './provider-credential.ts'
 import { ProviderSettingsStore } from './provider-settings.ts'
@@ -25,7 +37,9 @@ import {
 
 export * from '../core/activation-gate.ts'
 export * from '../core/bm25.ts'
+export * from '../core/command-input.ts'
 export * from '../core/provider.ts'
+export * from '../core/retrieval-context.ts'
 export * from '../core/knowledge-service.ts'
 export * from '../core/knowledge-types.ts'
 export * from '../core/local-vector.ts'
@@ -89,7 +103,7 @@ export function setSelectedKnowledgeBases(agent: Agent, ids: readonly string[]):
 }
 
 export function apply(ctx: Context): void {
-  const activations = new SingleTurnActivationGate<Agent>()
+  const activations = new SingleTurnActivationGate<Agent, SearchResult>()
   const vault = new SystemCredentialVault()
   const providerCredential = new RuntimeProviderCredential(vault)
   const storagePath = runtimeStoragePath()
@@ -133,29 +147,57 @@ export function apply(ctx: Context): void {
   ctx.inject(['commands'], commandCtx => {
     commandCtx.commands.register({
       name: 'dsh-rag',
-      description: '在当前 Session 已选择的知识库中检索一次',
-      input: { hint: '<问题>' },
-      handler: ({ agent, rawInput }) => {
-        const question = rawInput.trim()
+      description: '检索当前 Session 允许的知识库；可用 @"知识库名" 临时指定范围',
+      input: { hint: '[@"知识库名"] <问题>' },
+      handler: async ({ agent, rawInput, signal }) => {
+        const parsed = parseDshRagCommandInput(rawInput)
+        const question = parsed.question
         if (question === '') return { kind: 'error', text: '请输入要检索的问题。' }
-        const selected = foldKnowledgeSelection(agent.session.events)
-        if (selected.length === 0) {
-          return { kind: 'error', text: '请先在 Knowledge 中选择至少一个知识库。' }
+        const knowledgeBases = await knowledge.listKnowledgeBases()
+        const byName = new Map(knowledgeBases.map(item => [item.name, item]))
+        const unknownNames = parsed.knowledgeBaseNames.filter(item => !byName.has(item))
+        if (unknownNames.length > 0) {
+          return { kind: 'error', text: `找不到知识库：${unknownNames.join('、')}。请从 @ 菜单重新选择。` }
         }
+        const selected = parsed.knowledgeBaseNames.length > 0
+          ? parsed.knowledgeBaseNames.map(item => byName.get(item)?.id).filter((id): id is string => id !== undefined)
+          : foldKnowledgeSelection(agent.session.events)
+        if (selected.length === 0) {
+          return { kind: 'error', text: '请先在 Knowledge 中选择知识库，或输入 /dsh-rag 后用 @ 选择本轮知识库。' }
+        }
+        const selectedNames = parsed.knowledgeBaseNames.length > 0
+          ? parsed.knowledgeBaseNames
+          : knowledgeBases.filter(item => selected.includes(item.id)).map(item => item.name)
+        const result = await knowledge.search(selected, question, 5, signal)
+        signal.throwIfAborted()
+        const retrievalEvent = agent.session.append('dsh-rag/retrieval', {
+          result,
+          knowledgeBaseNames: selectedNames,
+        })
+        agent.inject(createUserMessage({
+          content: [{ type: 'text', text: renderRetrievalContext(result, selectedNames) }],
+          source: { kind: 'plugin', plugin: 'dsh-rag' },
+        }))
+        const visibleCommand = `/dsh-rag ${selectedNames.map(formatKnowledgeBaseSelector).join('')}${question}`
         const message = createUserMessage({
-          content: [{ type: 'text', text: question }],
+          content: [{ type: 'text', text: visibleCommand }],
           source: { kind: 'user' },
         })
-        activations.issue(agent, String(message.id), selected)
+        activations.issue(agent, String(message.id), result)
+        signal.throwIfAborted()
         agent.steer(message)
-        return { kind: 'success', text: '已为下一轮启用所选知识库检索。' }
+        return {
+          kind: 'success',
+          text: `已检索 ${selectedNames.length} 个知识库，找到 ${result.sources.length} 条来源，正在生成回答。`,
+          sourceEventSeq: retrievalEvent.seq,
+        }
       },
     })
   })
 
   ctx.tools.register(defineTool({
     name: 'knowledge_search',
-    description: 'Search the knowledge bases explicitly activated by the current /dsh-rag turn.',
+    description: 'Return the retrieval result already prepared by the current /dsh-rag turn.',
     parameters: {
       query: { type: 'string', required: true, description: 'The user question to retrieve evidence for.' },
     },
@@ -169,7 +211,7 @@ export function apply(ctx: Context): void {
       if (claim === undefined) {
         throw new Error('knowledge_search is only available once in the turn created by /dsh-rag')
       }
-      return JSON.stringify(await knowledge.search(claim.knowledgeBaseIds, args.query))
+      return JSON.stringify(claim.payload)
     },
   }))
 
@@ -192,14 +234,21 @@ export function apply(ctx: Context): void {
 
   ctx.tools.register(defineTool({
     name: 'knowledge_status',
-    description: 'List configured local knowledge bases and index counts without returning document text.',
+    description: 'Report only the knowledge bases that the current Session is allowed to search, plus index counts.',
     parameters: {},
     output: {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: value }],
     },
-    async execute() {
-      return JSON.stringify(await knowledge.listKnowledgeBases())
+    async execute(_args, exec) {
+      const configured = await knowledge.listKnowledgeBases()
+      const selectedKnowledgeBaseIds = exec.agent === undefined
+        ? []
+        : foldKnowledgeSelection(exec.agent.session.events)
+      return JSON.stringify({
+        selectedKnowledgeBaseIds,
+        selectedKnowledgeBases: configured.filter(item => selectedKnowledgeBaseIds.includes(item.id)),
+      })
     },
   }))
 
@@ -255,7 +304,7 @@ export function apply(ctx: Context): void {
                 rerank: settings.rerankModel,
               },
               dataTransfer: {
-                embedding: 'Only new or changed extracted chunks.',
+                embedding: 'The first cloud index sends all extracted text chunks; later syncs send only new or changed chunks.',
                 rerank: 'The query and a limited set of candidate chunks.',
                 originalBinaryUploads: false,
               },

@@ -24,7 +24,7 @@ import type {
 import { authorizeRoot, resolveAuthorizedPath } from './path-security.ts'
 import { parseOfficeDocument } from './office-parser.ts'
 import { parsePdfDocument } from './pdf-parser.ts'
-import { ProviderError, type EmbeddingProvider, type RerankProvider } from './provider.ts'
+import { isAbortError, ProviderError, throwIfAborted, type EmbeddingProvider, type RerankProvider } from './provider.ts'
 import { parseTextDocument } from './text-parser.ts'
 
 const EMPTY_CONFIG: KnowledgeConfig = { schemaVersion: 1, knowledgeBases: [] }
@@ -72,7 +72,7 @@ export interface KnowledgeServiceOptions {
 }
 
 export const AI_CONTEXT_RELEASE_ENABLED = false
-const AI_CONTEXT_RELEASE_ERROR = 'AI context is unavailable in v0.1.0 because the release quality gate failed'
+const AI_CONTEXT_RELEASE_ERROR = 'AI context is unavailable in v0.1 because the release quality gate failed'
 
 function fileKey(rootPath: string, relativePath: string): string {
   return `${rootPath}\0${relativePath.split(path.sep).join('/')}`
@@ -239,6 +239,11 @@ export class KnowledgeService {
   async createKnowledgeBase(nameInput: string, rootInputs: readonly string[]): Promise<KnowledgeBaseConfig> {
     const name = nameInput.trim()
     if (name === '') throw new Error('knowledge base name is required')
+    const hasControlCharacter = [...name].some(character => {
+      const codePoint = character.codePointAt(0) ?? 0
+      return codePoint <= 0x1F || codePoint >= 0x7F && codePoint <= 0x9F
+    })
+    if (hasControlCharacter) throw new Error('knowledge base name cannot contain control characters')
     if (rootInputs.length === 0) throw new Error('at least one authorized root is required')
     const roots = [...new Set(await Promise.all(rootInputs.map(authorizeRoot)))]
     const config = await this.loadConfig()
@@ -584,7 +589,8 @@ export class KnowledgeService {
     return result('completed', next.generation, vector)
   }
 
-  async search(knowledgeBaseIds: readonly string[], queryInput: string, limit = 5): Promise<SearchResult> {
+  async search(knowledgeBaseIds: readonly string[], queryInput: string, limit = 5, signal?: AbortSignal): Promise<SearchResult> {
+    throwIfAborted(signal)
     const query = queryInput.trim()
     if (query === '') throw new Error('search query is required')
     const config = await this.loadConfig()
@@ -609,10 +615,12 @@ export class KnowledgeService {
 
     let queryVector: readonly number[]
     try {
-      const vectors = await this.embeddingProvider.embed([query])
+      const vectors = await this.embeddingProvider.embed([query], signal)
       queryVector = vectors[0] ?? []
       if (queryVector.length === 0) return localOnly('query-embedding-invalid')
     } catch (error) {
+      throwIfAborted(signal)
+      if (isAbortError(error)) throw error
       const code = error instanceof ProviderError ? error.code : error instanceof Error ? error.name : 'QUERY_EMBEDDING_ERROR'
       return localOnly(`query-embedding-${code.toLocaleLowerCase()}`)
     }
@@ -647,7 +655,7 @@ export class KnowledgeService {
       if (source === undefined) throw new Error('hybrid source identity invariant failed')
       return { id: item.id, text: `${source.structuralContext}\n${source.snippet}` }
     })
-    const outcome = await rerankWithFallback(query, candidates, fused, this.rerankProvider, limit)
+    const outcome = await rerankWithFallback(query, candidates, fused, this.rerankProvider, limit, signal)
     const sources = outcome.ranking.slice(0, limit).map(item => {
       const source = sourceByChunkId.get(item.id)
       if (source === undefined) throw new Error('rerank source identity invariant failed')

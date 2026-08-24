@@ -2,6 +2,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { useCallback, useEffect, useState } from 'react'
 import type { PropsLocale, PropsRuntime, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
+import type { InputTriggerServiceContract, InputTriggerSource } from '@deepseek-ai/dsh-client-ui-input-trigger/client'
+import type { ConversationMatch, ConversationNodeDefinition } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -10,22 +12,43 @@ import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import { DSH_RAG_LOCALE_NS, en, type DshRagLocaleKey, zh } from './locales.ts'
 import { DSH_RAG_STYLES } from './styles.ts'
 
-export const inject = ['slots', 'locale']
+export const inject = ['slots', 'locale', 'inputTriggers', 'conversationEvents']
+
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionMap {
+    'dsh-rag': { readonly selectedKnowledgeBaseIds: readonly string[] }
+  }
+}
+
+interface ClientRetrievalEvent {
+  readonly result: ClientSearchResult
+  readonly knowledgeBaseNames: readonly string[]
+}
+
+declare module '@deepseek-ai/dsh-session/types' {
+  interface SessionEventMap {
+    'dsh-rag/retrieval': ClientRetrievalEvent
+  }
+}
+
+declare module '@deepseek-ai/dsh-client-ui-conversation/client' {
+  interface ChatNodeDataMap {
+    'dsh-rag/retrieval': ClientRetrievalEvent
+  }
+}
 
 type T = TranslateNS<typeof DSH_RAG_LOCALE_NS>
 type LocalizedProps = PropsLocale<typeof DSH_RAG_LOCALE_NS>
 type Tone = 'neutral' | 'success' | 'warning' | 'danger'
 
+function formatKnowledgeBaseSelector(name: string): string {
+  return `@${JSON.stringify(name)} `
+}
+
 interface Notice {
   readonly key: DshRagLocaleKey
   readonly params?: Record<string, unknown>
   readonly kind?: 'status' | 'error'
-}
-
-interface ProbeState {
-  readonly state: 'loading' | 'connected' | 'disconnected'
-  readonly configured?: boolean
-  readonly error?: string
 }
 
 interface ProviderSettingsState {
@@ -79,6 +102,36 @@ interface ClientSearchResult {
   readonly degraded: boolean
   readonly degradedReasons: readonly string[]
   readonly sources: readonly ClientSource[]
+}
+
+function retrievalFromMatch(match: ConversationMatch): ClientRetrievalEvent {
+  if (match.event.type !== 'dsh-rag/retrieval') throw new Error('DSH-RAG retrieval node requires a retrieval event')
+  return match.event.data
+}
+
+export const retrievalConversationDefinition: ConversationNodeDefinition<ClientRetrievalEvent> = {
+  kind: 'dsh-rag/retrieval',
+  target: 'chat',
+  match: event => event.type === 'dsh-rag/retrieval'
+    ? { id: String(event.seq), role: 'start' }
+    : null,
+  start: (_context, match) => retrievalFromMatch(match),
+  update: context => context.state,
+  buildViewNode: context => {
+    const data = context.state ?? (context.start === undefined ? undefined : retrievalFromMatch(context.start))
+    const start = context.start ?? context.matches[0]
+    if (data === undefined || start === undefined) return null
+    return {
+      key: context.key,
+      kind: 'dsh-rag/retrieval',
+      id: context.id,
+      target: 'chat',
+      anchorSeq: start.event.seq,
+      location: start.location,
+      visibility: 'visible',
+      data,
+    }
+  },
 }
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -143,27 +196,6 @@ function useKnowledgeBases(): {
   return { knowledgeBases, refresh, ...(error === undefined ? {} : { error }) }
 }
 
-function useHostProbe(): ProbeState {
-  const [state, setState] = useState<ProbeState>({ state: 'loading' })
-  useEffect(() => {
-    const controller = new AbortController()
-    void fetch('/dsh-rag/api/m0', { signal: controller.signal, credentials: 'same-origin' })
-      .then(async response => {
-        const body = await response.json() as { ok?: boolean; credential?: { configured?: boolean }; error?: string }
-        setState({
-          state: response.ok && body.ok === true ? 'connected' : 'disconnected',
-          ...(typeof body.credential?.configured === 'boolean' ? { configured: body.credential.configured } : {}),
-          ...(body.error === undefined ? {} : { error: body.error }),
-        })
-      })
-      .catch(error => {
-        if (!controller.signal.aborted) setState({ state: 'disconnected', error: String(error) })
-      })
-    return () => { controller.abort() }
-  }, [])
-  return state
-}
-
 function useProviderSettings(): {
   readonly provider?: ProviderSettingsState
   readonly refreshProvider: () => Promise<void>
@@ -211,7 +243,6 @@ function formatCounts(counts: Readonly<Record<string, number>>, t: T): string {
 }
 
 function KnowledgeSettings({ t }: LocalizedProps): JSX.Element {
-  const probe = useHostProbe()
   const { provider, refreshProvider, providerError } = useProviderSettings()
   const { knowledgeBases, refresh, error } = useKnowledgeBases()
   const [name, setName] = useState('')
@@ -297,26 +328,20 @@ function KnowledgeSettings({ t }: LocalizedProps): JSX.Element {
     } catch (cause) { setNotice({ key: 'error.deleteKnowledgeBase', params: { error: String(cause) }, kind: 'error' }) } finally { setBusy(undefined) }
   }
 
-  const credentialConfigured = provider?.credential.configured === true || probe.configured === true
-  const credentialSource = provider?.credential.source
+  const credentialConfigured = provider?.credential.configured === true
 
   return (
     <section className="dsh-rag dsh-rag-page" data-dsh-rag-surface="settings">
       <Styles />
       <header className="dsh-rag-header"><div><div className="dsh-rag-eyebrow"><KnowledgeIcon />DSH-RAG</div><h2 className="dsh-rag-title">{t('settings.title')}</h2><p className="dsh-rag-subtitle">{t('settings.subtitle')}</p></div></header>
-      <div className="dsh-rag-status-grid">
-        <div className="dsh-rag-status-card"><div className="dsh-rag-status-label">{t('status.host')}</div><div className="dsh-rag-status-value"><StatusDot tone={probe.state === 'connected' ? 'success' : probe.state === 'loading' ? 'neutral' : 'danger'} /><span>{t(probe.state === 'connected' ? 'status.connected' : probe.state === 'loading' ? 'status.loading' : 'status.disconnected')}</span></div></div>
-        <div className="dsh-rag-status-card"><div className="dsh-rag-status-label">{t('status.credential')}</div><div className="dsh-rag-status-value"><StatusDot tone={credentialConfigured ? 'success' : 'warning'} /><span>{credentialConfigured ? t('status.configured') : t('status.unconfigured')}{credentialConfigured && credentialSource !== undefined ? ` · ${credentialSource}` : ''}</span></div></div>
-        <div className="dsh-rag-status-card"><div className="dsh-rag-status-label">{t('status.retrieval')}</div><div className="dsh-rag-status-value"><StatusDot tone="warning" /><span>{t('status.localBm25')}</span></div><p className="dsh-rag-status-note">{t('status.localBm25Hint')}</p></div>
-      </div>
-      <aside className="dsh-rag-boundary"><BoundaryIcon /><div><strong>{t('cloud.title')}</strong><p>{t('cloud.description')}</p></div></aside>
       {notice === undefined ? null : <Message notice={notice} t={t} />}
       {providerError === undefined ? null : <Message notice={{ key: 'error.providerState', params: { error: providerError }, kind: 'error' }} t={t} />}
       {error === undefined ? null : <Message notice={{ key: 'error.knowledgeLoad', params: { error }, kind: 'error' }} t={t} />}
 
       <section className="dsh-rag-card">
-        <header className="dsh-rag-card-head"><div><h3 className="dsh-rag-card-title">{t('provider.title')}</h3><p className="dsh-rag-card-description">{t('provider.subtitle')}</p></div><StatusDot tone={credentialConfigured ? 'success' : 'warning'} /></header>
+        <header className="dsh-rag-card-head"><div><h3 className="dsh-rag-card-title">{t('provider.title')}</h3><p className="dsh-rag-card-description">{t('provider.subtitle')}</p></div><span className="dsh-rag-state-badge" data-tone={providerError === undefined ? credentialConfigured ? 'success' : 'warning' : 'danger'}>{providerError === undefined ? credentialConfigured ? t('status.configured') : t('status.unconfigured') : t('status.disconnected')}</span></header>
         <div className="dsh-rag-card-body">
+          <aside className="dsh-rag-boundary"><BoundaryIcon /><div><strong>{t('cloud.title')}</strong><p>{t('cloud.description')}</p></div></aside>
           <div className="dsh-rag-form-grid">
             <label className="dsh-rag-field" data-span="full">{t('provider.endpoint')}<input className="dsh-rag-input" aria-label={t('provider.endpoint')} value={endpoint} onChange={event => { setEndpoint(event.target.value) }} /></label>
             <label className="dsh-rag-field">{t('provider.embedding')}<input className="dsh-rag-input" aria-label={t('provider.embedding')} value={embeddingModel} onChange={event => { setEmbeddingModel(event.target.value) }} /></label>
@@ -361,19 +386,15 @@ function KnowledgeSettings({ t }: LocalizedProps): JSX.Element {
 function KnowledgeConversation(props: PropsRuntime<'conversation.view'> & LocalizedProps): JSX.Element {
   const { t } = props
   const { knowledgeBases, error } = useKnowledgeBases()
-  const [selected, setSelected] = useState<readonly string[]>([])
+  const selected = props.useProjection('dsh-rag', value => value?.selectedKnowledgeBaseIds ?? [])
   const [notice, setNotice] = useState<Notice>()
   const sessionId = String(props.sessionId)
-
-  useEffect(() => {
-    void api<{ selectedKnowledgeBaseIds: string[] }>(`/dsh-rag/api/v1/sessions/${encodeURIComponent(sessionId)}/selection`).then(body => { setSelected(body.selectedKnowledgeBaseIds) }).catch(cause => { setNotice({ key: 'error.selectionLoad', params: { error: String(cause) }, kind: 'error' }) })
-  }, [sessionId])
 
   const update = async (id: string, checked: boolean): Promise<void> => {
     const next = checked ? [...new Set([...selected, id])] : selected.filter(value => value !== id)
     try {
       const body = await api<{ selectedKnowledgeBaseIds: string[] }>(`/dsh-rag/api/v1/sessions/${encodeURIComponent(sessionId)}/selection`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ knowledgeBaseIds: next }) })
-      setSelected(body.selectedKnowledgeBaseIds); setNotice({ key: body.selectedKnowledgeBaseIds.length === 0 ? 'notice.selectionEmpty' : 'notice.selectionSaved' })
+      setNotice({ key: body.selectedKnowledgeBaseIds.length === 0 ? 'notice.selectionEmpty' : 'notice.selectionSaved' })
     } catch (cause) { setNotice({ key: 'error.selectionSave', params: { error: String(cause) }, kind: 'error' }) }
   }
 
@@ -387,7 +408,7 @@ function KnowledgeConversation(props: PropsRuntime<'conversation.view'> & Locali
       })}</div>}
       {error === undefined ? null : <Message notice={{ key: 'error.knowledgeLoad', params: { error }, kind: 'error' }} t={t} />}
       {notice === undefined ? null : <Message notice={notice} t={t} />}
-      <div className="dsh-rag-command"><div><strong>{t('conversation.commandTitle')}</strong><p>{t('conversation.commandHelp')}</p></div><code className="dsh-rag-code">/dsh-rag &lt;question&gt;</code></div>
+      <div className="dsh-rag-command"><div><strong>{t('conversation.commandTitle')}</strong><p>{t('conversation.commandHelp')}</p></div><code className="dsh-rag-code">/dsh-rag [@knowledge-base] &lt;question&gt;</code></div>
     </section>
   )
 }
@@ -415,16 +436,24 @@ function retrievalMode(result: ClientSearchResult, t: T): string {
   return t('tool.modeBm25')
 }
 
-function KnowledgeToolView(props: ToolCallViewProps & LocalizedProps): JSX.Element {
-  const { t } = props
-  const result = findSearchResult(props.block)
+function KnowledgeResultCard({
+  result,
+  t,
+  openFile,
+  surface,
+}: {
+  readonly result: ClientSearchResult | undefined
+  readonly t: T
+  readonly openFile: (path: string) => void
+  readonly surface: 'tool' | 'retrieval'
+}): JSX.Element {
   const [notice, setNotice] = useState<Notice>()
   const open = async (sourceId: string): Promise<void> => {
-    try { const body = await api<{ path: string }>(`/dsh-rag/api/v1/sources/${encodeURIComponent(sourceId)}/resolve`, { method: 'POST' }); props.openFile(body.path); setNotice({ key: 'notice.opened' }) }
+    try { const body = await api<{ path: string }>(`/dsh-rag/api/v1/sources/${encodeURIComponent(sourceId)}/resolve`, { method: 'POST' }); openFile(body.path); setNotice({ key: 'notice.opened' }) }
     catch (cause) { setNotice({ key: 'error.open', params: { error: String(cause) }, kind: 'error' }) }
   }
   return (
-    <article className="dsh-rag dsh-rag-tool" data-dsh-rag-surface="tool">
+    <article className="dsh-rag dsh-rag-tool" data-dsh-rag-surface={surface}>
       <Styles /><div className="dsh-rag-tool-head"><StatusDot tone={result === undefined || result.degraded ? 'warning' : 'success'} /><strong>{t('tool.title')}</strong></div>
       {result === undefined ? <p className="dsh-rag-tool-mode">{t('tool.pending')}</p> : <p className="dsh-rag-tool-mode">{t('tool.mode')}: {retrievalMode(result, t)}</p>}
       {result?.degraded === true && result.degradedReasons.length > 0 ? <p className="dsh-rag-tool-mode">{t('tool.degradedReason', { reasons: result.degradedReasons.join(' · ') })}</p> : null}
@@ -435,10 +464,40 @@ function KnowledgeToolView(props: ToolCallViewProps & LocalizedProps): JSX.Eleme
   )
 }
 
+function KnowledgeToolView(props: ToolCallViewProps & LocalizedProps): JSX.Element {
+  return <KnowledgeResultCard result={findSearchResult(props.block)} t={props.t} openFile={props.openFile} surface="tool" />
+}
+
+function KnowledgeRetrievalView(props: PropsRuntime<'conversation.chat.node', 'dsh-rag/retrieval'> & LocalizedProps): JSX.Element {
+  return <KnowledgeResultCard result={props.node.data.result} t={props.t} openFile={props.openFile} surface="retrieval" />
+}
+
 export function apply(ctx: Context): void {
   ctx.effect(() => ctx.locale.register(DSH_RAG_LOCALE_NS, { zh, en }), 'dsh-rag: bilingual UI dictionaries')
   const t = ctx.locale.bind(DSH_RAG_LOCALE_NS)
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'dsh-rag', order: 40, label: () => t('nav.settings'), locale: DSH_RAG_LOCALE_NS }, KnowledgeSettings))
   ctx.slots.inject('conversation.view', () => ctx.slots.register({ name: 'conversation.view', id: 'knowledge', order: 20, label: () => t('nav.conversation'), locale: DSH_RAG_LOCALE_NS }, KnowledgeConversation))
   ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({ name: 'tool.call.toolview', key: 'knowledge_search', locale: DSH_RAG_LOCALE_NS }, KnowledgeToolView))
+  ctx.effect(() => ctx.conversationEvents.register(retrievalConversationDefinition), 'dsh-rag: retrieval conversation event')
+  ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({ name: 'conversation.chat.node', key: 'dsh-rag/retrieval', locale: DSH_RAG_LOCALE_NS }, KnowledgeRetrievalView))
+  const inputTriggers = ctx.get('inputTriggers') as InputTriggerServiceContract
+  const source: InputTriggerSource = {
+    trigger: '@',
+    name: 'dsh-rag',
+    order: 30,
+    candidates: async (_session, request) => {
+      if (request.position === 'leading') return []
+      const body = await api<{ knowledgeBases: KnowledgeBaseSummary[] }>('/dsh-rag/api/v1/knowledge-bases', { signal: request.signal })
+      const query = request.query.trim().toLocaleLowerCase()
+      return body.knowledgeBases
+        .filter(item => query === '' || item.name.toLocaleLowerCase().includes(query))
+        .map(item => ({
+          name: item.name,
+          description: `${t('knowledge.documents', { count: item.documentCount })} · ${syncLabel(item, t)}`,
+          icon: '📚',
+        }))
+    },
+    onPick: ({ candidate }) => ({ text: formatKnowledgeBaseSelector(candidate.name) }),
+  }
+  ctx.effect(() => inputTriggers.registerSource(source), 'dsh-rag: knowledge-base @ picker')
 }

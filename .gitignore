@@ -18,4 +18,5 @@ fixtures/**/dsh-home/
 data/
 indexes/
 models/
+.dsh-rag/
 .dsh-rag-public-*

@@ -319,7 +319,7 @@ export class SiliconFlowProvider implements EmbeddingProvider, RerankProvider, G
           authorization: `Bearer ${key}`,
           'content-type': 'application/json',
           accept: 'application/json',
-          'user-agent': '@kai232/dsh-rag/0.1.0',
+          'user-agent': '@kai232/dsh-rag/0.1.1',
         },
         body: JSON.stringify(body),
         signal,

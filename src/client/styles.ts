@@ -30,13 +30,7 @@ export const DSH_RAG_STYLES = String.raw`
 .dsh-rag-dot[data-tone="success"] { background: var(--rag-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rag-success) 13%, transparent); }
 .dsh-rag-dot[data-tone="warning"] { background: var(--rag-warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rag-warning) 13%, transparent); }
 .dsh-rag-dot[data-tone="danger"] { background: var(--rag-danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--rag-danger) 13%, transparent); }
-.dsh-rag-status-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
-.dsh-rag-status-card { min-width: 0; border: 1px solid var(--rag-border-soft); border-radius: 14px; background: var(--rag-layer-1); padding: 13px 14px; }
-.dsh-rag-status-label { color: var(--rag-text-3); font: var(--dsw-font-xs-13, 13px/20px system-ui, sans-serif); }
-.dsh-rag-status-value { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 5px; color: var(--rag-text); font-weight: 550; }
-.dsh-rag-status-value > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dsh-rag-status-note { margin: 3px 0 0 16px; color: var(--rag-text-3); font-size: 12px; line-height: 17px; }
-.dsh-rag-boundary { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: flex-start; border: 1px solid color-mix(in srgb, var(--rag-accent) 24%, var(--rag-border)); border-radius: 14px; background: color-mix(in srgb, var(--rag-accent) 6%, var(--rag-bg)); padding: 13px 15px; margin-bottom: 16px; }
+.dsh-rag-boundary { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: flex-start; border: 1px solid var(--rag-border-soft); border-radius: 12px; background: var(--rag-layer-1); padding: 12px 13px; margin-bottom: 16px; }
 .dsh-rag-boundary .dsh-rag-icon { color: var(--rag-accent); margin-top: 1px; }
 .dsh-rag-boundary strong { display: block; margin-bottom: 3px; font-weight: 600; }
 .dsh-rag-boundary p { margin: 0; color: var(--rag-text-2); font-size: 13px; line-height: 1.6; }
@@ -44,6 +38,10 @@ export const DSH_RAG_STYLES = String.raw`
 .dsh-rag-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; }
 .dsh-rag-card-title { margin: 0; font: var(--dsw-font-base-strong-16, 600 16px/24px system-ui, sans-serif); }
 .dsh-rag-card-description { margin: 4px 0 0; color: var(--rag-text-3); font-size: 13px; line-height: 1.5; }
+.dsh-rag-state-badge { flex: none; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid var(--rag-border-soft); border-radius: 999px; background: var(--rag-layer-1); color: var(--rag-text-2); padding: 4px 9px; font-size: 12px; }
+.dsh-rag-state-badge[data-tone="success"] { color: var(--rag-success); }
+.dsh-rag-state-badge[data-tone="warning"] { color: var(--rag-warning); }
+.dsh-rag-state-badge[data-tone="danger"] { color: var(--rag-danger); }
 .dsh-rag-card-body { padding: 2px 20px 20px; }
 .dsh-rag-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .dsh-rag-field { display: grid; gap: 6px; min-width: 0; color: var(--rag-text-2); font-size: 13px; }
@@ -105,7 +103,6 @@ export const DSH_RAG_STYLES = String.raw`
 .dsh-rag-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 @media (max-width: 720px) {
   .dsh-rag-page { padding: 22px 18px 36px; }
-  .dsh-rag-status-grid { grid-template-columns: 1fr; }
   .dsh-rag-form-grid { grid-template-columns: 1fr; }
   .dsh-rag-field[data-span="full"] { grid-column: auto; }
   .dsh-rag-command { grid-template-columns: 1fr; }

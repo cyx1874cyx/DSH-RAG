@@ -54,3 +54,15 @@ export class ProviderError extends Error {
     if (options.requestId !== undefined) this.requestId = options.requestId
   }
 }
+
+export function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError'
+    || error instanceof ProviderError && error.code === 'ABORTED'
+    || error instanceof Error && error.name === 'AbortError'
+}
+
+export function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted !== true) return
+  if (signal.reason instanceof Error) throw signal.reason
+  throw new DOMException('Aborted', 'AbortError')
+}

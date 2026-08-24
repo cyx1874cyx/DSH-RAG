@@ -25,7 +25,7 @@ DeepSeek Harness is currently a developer preview. DSH-RAG declares compatibilit
 ## Install or Update
 
 ```powershell
-dsh plugin --profile web add @kai232/dsh-rag@0.1.0
+dsh plugin --profile web add @kai232/dsh-rag@0.1.1
 dsh --profile web --no-open
 ```
 
@@ -39,7 +39,7 @@ Use the same `plugin add` command to update an existing installation, then resta
 4. Run the fixed-text connection test. It does not send knowledge-base content.
 5. Create a knowledge base with a name and an absolute path to a folder you authorize.
 6. Select **Sync** and wait for indexing to finish.
-7. Open the conversation **Knowledge** panel and choose which knowledge bases the current Session may search.
+7. Open the conversation **Knowledge** panel and choose which knowledge bases the current Session may search. In a new Session, type `@` in the command to choose a knowledge base for that turn instead.
 
 Knowledge-base names and file names are user data and are not translated when the interface language changes.
 
@@ -51,19 +51,27 @@ Run an explicit retrieval turn:
 /dsh-rag What does the project note say about the launch window?
 ```
 
-The command searches only the knowledge bases selected for the current Session. If none are selected, it stops with guidance instead of searching every knowledge base. The next regular message returns to zero retrieval.
+The plugin completes retrieval before it asks the model to answer, so retrieval never depends on whether the model chooses to call a tool. The command searches only the knowledge bases selected for the current Session. If none are selected, it stops with guidance instead of searching every knowledge base.
+
+You can also use `@` in any new Session to override the scope for one turn without changing the saved Session selection:
+
+```text
+/dsh-rag @"Project notes" Which Python version does the virtual environment use?
+```
+
+The generated user message keeps `/dsh-rag` and the actual knowledge-base names visible, making the retrieval path explicit. The next regular message returns to zero retrieval.
 
 Results identify the knowledge base, file, structural context, excerpt, and exact source location. The open action accepts an opaque source ID; the Host resolves and validates the path again before asking the operating system to open it.
 
 ## Retrieval and Offline Behavior
 
-With SiliconFlow configured, indexing sends only new or changed extracted text chunks for Embedding. Each explicit query sends the query and a limited candidate set for Reranking. Original file binaries are never uploaded.
+With SiliconFlow configured, the first cloud vector index sends every text chunk extracted from the authorized documents. Later syncs send only new or changed chunks for Embedding. Each explicit query sends the query and a limited candidate set for Reranking. Original PDF, Word, or PowerPoint files are not uploaded, but their extracted text is sent to SiliconFlow.
 
 If SiliconFlow or the network is unavailable, DSH-RAG reports the fallback and continues with local BM25. Existing local indexes remain available. The v0.1 release does not expose AI-generated document or section context because that experiment did not improve the frozen retrieval evaluation.
 
 ## Local Data and Deletion
 
-Derived data is stored under `$DSH_HOME/dsh-rag-data/` by default. Set `DSH_RAG_DATA_DIR` to an absolute path before starting DSH to use another location.
+Derived data is stored under `$DSH_HOME/dsh-rag/` by default. Set `DSH_RAG_DATA_DIR` to an absolute path before starting DSH to use another location.
 
 The **Delete knowledge base** action uses a second confirmation and removes only the knowledge-base settings and reproducible catalogs, checkpoints, and indexes. It never modifies or deletes files in the authorized source folders.
 

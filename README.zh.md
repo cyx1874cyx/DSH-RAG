@@ -2,6 +2,8 @@
 
 [English](./README.md) | 简体中文
 
+[![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin) [![dshfind](https://dshfind.com/api/badge/imkelt/DSH-RAG)](https://dshfind.com/en/plugins/imkelt/DSH-RAG?ref=badge)
+
 DSH-RAG 是面向 DeepSeek Harness Web 的本地知识库插件。它把用户明确授权的本机目录建立为可增量同步的命名知识库；执行 `/rag <问题>` 时，插件会在模型回答前完成检索，并展示带原文片段、精确位置和原文件打开入口的可核查来源。普通对话不会访问本地资料。
 
 ## 功能

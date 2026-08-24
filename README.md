@@ -2,6 +2,8 @@
 
 English | [简体中文](./README.zh.md)
 
+[![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin) [![dshfind](https://dshfind.com/api/badge/imkelt/DSH-RAG)](https://dshfind.com/en/plugins/imkelt/DSH-RAG?ref=badge)
+
 DSH-RAG is a local knowledge-base plugin for DeepSeek Harness Web. It turns explicitly authorized folders into named, incrementally synchronized knowledge bases. When you run `/rag <question>`, it retrieves evidence before the model answers and shows verifiable sources with excerpts, exact locations, and open-file actions. Regular chat never accesses local documents.
 
 ## Features

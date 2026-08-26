@@ -4,17 +4,23 @@ English | [简体中文](./README.zh.md)
 
 [![Awesome DSH Plugin](https://beancookie.github.io/awesome-dsh-plugin/badge.svg)](https://beancookie.github.io/awesome-dsh-plugin) [![dshfind](https://dshfind.com/api/badge/imkelt/DSH-RAG)](https://dshfind.com/en/plugins/imkelt/DSH-RAG?ref=badge)
 
-DSH-RAG is a local knowledge-base plugin for DeepSeek Harness Web. It turns explicitly authorized folders into named, incrementally synchronized knowledge bases. When you run `/rag <question>`, it retrieves evidence before the model answers and shows verifiable sources with excerpts, exact locations, and open-file actions. Regular chat never accesses local documents.
+<p align="center">
+  <img src="./assets/readme/dsh-rag-en.svg" alt="DSH-RAG: local knowledge bases and explicit /rag retrieval for DeepSeek Harness Web" width="100%">
+</p>
 
-## Features
+DSH-RAG is a local knowledge-base plugin for **DeepSeek Harness Web**. It turns explicitly authorized local folders into named, incrementally synchronized knowledge bases. When you run `/rag <question>`, retrieval completes before the model answers and the UI shows verifiable evidence with excerpts, exact source locations, and open-file actions.
 
-- Build multiple named knowledge bases from one or more explicitly authorized local folders.
-- Reuse named knowledge bases across projects and Sessions; each knowledge base may contain one or more explicitly authorized folders.
-- Limit retrieval to the knowledge bases selected for the current Session, or use one or more optional `@knowledge-base` selectors for a single-turn override. Regular messages never search or inject local documents.
-- Retrieve evidence before the model answers, then show collapsible source cards with the knowledge base, file, excerpt, exact page, slide, paragraph, or line reference, and a Host-validated action to open the original file.
-- Parse PDF, DOCX, PPTX, Markdown, and UTF-8 text files, with incremental indexing, cancellation, file-level checkpoints, watcher debouncing, and recovery scans.
-- Continue searching offline with local multilingual BM25; optionally enable SiliconFlow embeddings, local vectors, RRF, and reranking for hybrid retrieval.
-- Follow the DeepSeek Harness language and light/dark appearance settings with an English and Chinese UI.
+> Regular chat never accesses local documents. Retrieval runs only for explicit `/rag` turns, using either the knowledge bases selected for the current Session or a one-turn `@knowledge-base` override.
+
+## Highlights
+
+- **Named knowledge bases** — Build reusable knowledge bases from one or more explicitly authorized local folders and use them across projects and Sessions.
+- **Explicit `/rag` retrieval** — Retrieval completes before the model answers instead of depending on the model to decide whether to call a tool.
+- **Session-scoped search** — Search only the knowledge bases selected for the current Session, with optional `@knowledge-base` selectors for one-turn overrides.
+- **Verifiable evidence** — Source cards show the knowledge base, file, structural context, excerpt, and exact page, slide, paragraph, or line reference.
+- **Hybrid retrieval with offline fallback** — Local multilingual BM25 works without an API key or network; SiliconFlow can add embeddings, local vectors, RRF, and reranking.
+- **Local-document support** — Parse PDF, DOCX, PPTX, Markdown, and UTF-8 text with incremental indexing, cancellation, file-level checkpoints, watcher debouncing, and recovery scans.
+- **Bilingual, theme-aware UI** — Follow the DeepSeek Harness language setting and light, dark, or system appearance.
 
 ## Requirements
 
@@ -22,15 +28,13 @@ DSH-RAG is a local knowledge-base plugin for DeepSeek Harness Web. It turns expl
 - pnpm available on `PATH` (`dsh plugin` uses pnpm to manage profile packages)
 - DeepSeek Harness: tested with `0.1.1-rc.2`
 
-DeepSeek Harness is currently a developer preview. `0.1.1-rc.2` is the version DSH-RAG has verified through package installation, startup, and removal checks; it does not mean the plugin can run only on that version. Other DSH versions may work, but are not claimed as compatible until they pass the same checks.
+> DeepSeek Harness is currently a developer preview. `0.1.1-rc.2` is the version DSH-RAG has verified through package installation, startup, and removal checks; it does not mean the plugin can run only on that version. Other DSH versions may work, but are not claimed as compatible until they pass the same checks.
 
-## Install and Start
+## Quick Start
 
-Choose one of the following methods. Both install DSH-RAG into the same `web` profile, so you do not need to run both.
+### 1. Install and start
 
-### Method 1: Run DSH with npx
-
-Use this method if you have not installed the `dsh` command. Run the following commands from any directory:
+If you have not installed the `dsh` command, the simplest option is to run DSH through npx:
 
 ```powershell
 npx @deepseek-ai/dsh plugin --profile web add @kai232/dsh-rag
@@ -39,16 +43,17 @@ npx @deepseek-ai/dsh web
 
 Keep the second command running, then open the Web address printed in the terminal.
 
-### Method 2: Use an existing DSH installation
+#### If `dsh` is already installed
 
-If `dsh --version` works in your terminal, no directory change is required:
+If `dsh --version` works in your terminal:
 
 ```powershell
 dsh plugin --profile web add @kai232/dsh-rag
 dsh web
 ```
 
-If you prefer to run DSH from source, clone the repository and use its `pnpm dsh` script:
+
+#### Run from the DeepSeek Harness source repository
 
 ```powershell
 git clone https://github.com/deepseek-ai/deepseek-harness.git
@@ -61,46 +66,155 @@ pnpm dsh web
 
 If you already have a local checkout, skip `git clone`, enter its root directory, and continue with `pnpm install`. The `pnpm run build` step prepares the source artifacts used by `pnpm dsh web`.
 
+
 To update DSH-RAG, stop the running Web process, repeat the corresponding `plugin add` command, and start Web again.
 
-## Set Up a Knowledge Base
+### 2. Create and sync a knowledge base
 
-1. Open **Settings → Knowledge**.
-2. Review the SiliconFlow endpoint and the Embedding and Reranker model names.
-3. Enter a SiliconFlow API key and save it to the operating-system credential vault. If the vault is unavailable, set `SILICONFLOW_API_KEY` before starting DSH; the plugin never falls back to a plaintext key file. Connection status is checked automatically, and **Retry** appears only after a failure.
-4. Create a knowledge base in Settings. Enter only folders you explicitly authorize.
-5. Select **Sync** and wait for indexing to finish.
-6. In the conversation **Knowledge** panel, choose which knowledge bases the Session may search. For a one-turn override, type `/rag` and choose one knowledge base in the first command menu.
+Open **Settings → Knowledge**. SiliconFlow is optional: configure the Endpoint, Embedding model, Reranker model, and API key when you want hybrid retrieval. Without an API key or network, local BM25 retrieval still works.
+
+The API key is stored in the operating-system credential vault. If the vault is unavailable, set `SILICONFLOW_API_KEY` before starting DSH; the plugin never falls back to a plaintext key file. Connection status is checked automatically, and **Retry** appears only after a failure.
+
+#### Configure retrieval models
+
+<p align="center">
+  <img src="./assets/readme/sidebar1.png" alt="Configure the SiliconFlow embedding and reranker models" width="82%">
+</p>
+
+<p align="center">
+  <sub>Optional: configure model services for vector retrieval and reranking.</sub>
+</p>
+
+#### Create and sync a knowledge base
+
+<p align="center">
+  <img src="./assets/readme/sidebar2.png" alt="Create and synchronize a local knowledge base" width="82%">
+</p>
+
+<p align="center">
+  <sub>Create a knowledge base from explicitly authorized local folders, then sync it.</sub>
+</p>
 
 Knowledge-base names and file names are user data and are not translated when the interface language changes.
 
-## Use
+### 3. Choose the Session retrieval scope
 
-Command format:
+In the conversation **Knowledge** panel, select the knowledge bases the current Session may search. The selection becomes the saved default retrieval scope for that Session; selecting a knowledge base does not trigger automatic retrieval.
+
+<p align="center">
+  <img src="./assets/readme/knowledge.png" alt="Choose the knowledge bases the current Session may search" width="82%">
+</p>
+
+### 4. Use `/rag`
+
+Basic command:
 
 ```text
 /rag <question>
 ```
 
-Typing `/rag` shows the command and one-turn variants for each knowledge base in the first menu. After entering the command, `/rag @` also shows knowledge bases above the general file, folder, and Session candidates; choosing one inserts its plain-text selector. Knowledge bases never appear in unrelated `@` menus or after the question has started. Pressing Space without choosing starts a question that uses the saved Session scope. Running `/rag` alone shows knowledge-base statistics and usage without calling the model.
-
-Run an explicit retrieval turn using the knowledge bases selected for the current Session:
+Use the scope saved for the current Session:
 
 ```text
 /rag What does the project note say about the launch window?
 ```
 
-The plugin completes retrieval before it asks the model to answer, so retrieval never depends on whether the model chooses to call a tool. The command searches only the knowledge bases selected for the current Session. If none are selected, it stops with guidance instead of searching every knowledge base.
+Typing `/rag` shows the base command and one-turn variants for each knowledge base in the first menu. After entering the command, `/rag @` also places knowledge bases above the general file, folder, and Session candidates; choosing one inserts a plain-text selector.
 
-To override the scope for one turn, select a knowledge base from the first `/rag` command menu. The plugin inserts the shortest unambiguous selector automatically without changing the saved Session selection:
+#### Type `/rag`
+
+<p align="center">
+  <img src="./assets/readme/chat1.png" alt="Typing /rag shows the available command and knowledge-base options" width="82%">
+</p>
+
+<p align="center">
+  <sub>Type <code>/rag</code> to see the command and one-turn knowledge-base variants.</sub>
+</p>
+
+#### Type `/rag @`
+
+<p align="center">
+  <img src="./assets/readme/chat2.png" alt="Typing /rag @ lets you choose a one-turn knowledge-base override" width="82%">
+</p>
+
+<p align="center">
+  <sub>Type <code>/rag @</code> to choose a temporary retrieval scope.</sub>
+</p>
+
+To override the scope for a single turn, select a knowledge base:
 
 ```text
 /rag @"Project notes" Which Python version does the virtual environment use?
 ```
 
-Names without whitespace use the shorter form, such as `/rag @Notes <question>`; quoted selectors remain available for names with spaces. The next regular message returns to zero retrieval.
+Names without whitespace use the shorter form, such as `/rag @Notes <question>`. The one-turn override does not change the Session's saved selection.
 
-Results identify the knowledge base, file, structural context, excerpt, and exact source location. The open action accepts an opaque source ID; the Host resolves and validates the path again before asking the operating system to open it.
+<p align="center">
+  <img src="./assets/readme/chat3.png" alt="Run an explicit retrieval query with /rag and a one-turn knowledge-base selector" width="82%">
+</p>
+
+Running `/rag` alone shows knowledge-base statistics and usage without calling the model. If no knowledge base is selected, the plugin stops with guidance instead of searching every knowledge base.
+
+<p align="center">
+  <img src="./assets/readme/rag.png" alt="Running /rag alone shows knowledge-base statistics and usage" width="82%">
+</p>
+
+## Inspect the Evidence
+
+For a `/rag` turn, DSH-RAG **completes retrieval first and only then passes the evidence to the model**. Retrieval therefore does not depend on whether the model decides to call a tool.
+
+Each source card identifies the knowledge base, file, structural context, excerpt, and exact source location. The open action sends only an opaque source ID; the Host resolves and validates the path again before asking the operating system to open it.
+
+<p align="center">
+  <img src="./assets/readme/retrieval_card_1.png" alt="DSH-RAG retrieval evidence card" width="86%">
+</p>
+
+<p align="center"><sub>Each result exposes the knowledge base, file, exact location, score, and the excerpt used as evidence.</sub></p>
+
+Use **Locate in source** or **Open file** to return to the original document and verify the surrounding context:
+
+<p align="center">
+  <img src="./assets/readme/source.png" alt="Open and verify the original document from a retrieval source" width="82%">
+</p>
+
+### More screenshots: switch the Session scope and retrieve again
+
+<p align="center">
+  <img src="./assets/readme/knowledge2.png" alt="Switch the knowledge-base selection for the current Session" width="82%">
+</p>
+
+<p align="center">
+  <img src="./assets/readme/chat4.png" alt="Run a /rag query after switching the Session retrieval scope" width="82%">
+</p>
+
+<p align="center">
+  <img src="./assets/readme/retrieval_card_3.png" alt="Retrieval evidence after switching knowledge bases" width="82%">
+</p>
+
+<p align="center">
+  <img src="./assets/readme/retrieval_card_4.png" alt="Model answer grounded in the newly selected knowledge base" width="82%">
+</p>
+
+
+## Retrieval Flow
+
+The explicit retrieval path is:
+
+```text
+/rag
+  ↓
+Resolve saved Session scope / one-turn @knowledge-base override
+  ↓
+Local BM25
+  ↓
+[With SiliconFlow configured: Embedding → local vectors → RRF → Reranker]
+  ↓
+Build verifiable source cards
+  ↓
+Pass retrieved evidence to the model
+```
+
+Regular messages bypass this path and never search or inject local documents.
 
 ## Retrieval and Offline Behavior
 

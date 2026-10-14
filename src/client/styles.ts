@@ -108,9 +108,12 @@ export const DSH_RAG_STYLES = String.raw`
 .dsh-rag-locator-panel { border: 1px solid var(--rag-border); border-radius: 12px; background: var(--rag-layer-2); box-shadow: 0 10px 28px color-mix(in srgb, #000 14%, transparent); margin-top: 12px; padding: 12px; }
 .dsh-rag-locator-text { color: var(--rag-text); background: var(--rag-layer-1); border: 1px solid var(--rag-border-soft); border-radius: 8px; font: inherit; line-height: 1.55; margin: 8px 0; max-height: 240px; overflow: auto; padding: 10px; white-space: pre-wrap; }
 .dsh-rag-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.dsh-rag-research-filters { display: grid; grid-template-columns: 2fr 1.5fr 1fr 1fr; gap: 12px; margin-top: 12px; }
+.dsh-rag-source a { color: var(--rag-accent); overflow-wrap: anywhere; }
+.dsh-rag-snippet { max-height: 220px; overflow: auto; }
 @media (max-width: 720px) {
   .dsh-rag-page { padding: 22px 18px 36px; }
-  .dsh-rag-form-grid { grid-template-columns: 1fr; }
+  .dsh-rag-form-grid, .dsh-rag-research-filters { grid-template-columns: 1fr; }
   .dsh-rag-field[data-span="full"] { grid-column: auto; }
   .dsh-rag-command { grid-template-columns: 1fr; }
 }

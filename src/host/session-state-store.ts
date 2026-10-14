@@ -2,6 +2,7 @@ import path from 'node:path'
 import { readJsonIfExists, writeJsonAtomic } from '../core/atomic-json.ts'
 import type { SearchResult } from '../core/knowledge-types.ts'
 import { normalizeKnowledgeBaseIds } from './selection.ts'
+import type { LiteratureFilters } from '../core/literature.ts'
 
 export interface RetrievalCardRecord {
   readonly commandId: string
@@ -15,6 +16,7 @@ interface SessionStateFile {
   readonly selections: Record<string, string[]>
   readonly parents: Record<string, string>
   readonly retrievals: Record<string, RetrievalCardRecord>
+  filters?: Record<string, LiteratureFilters>
 }
 
 function emptyState(): SessionStateFile {
@@ -63,6 +65,17 @@ export class SessionStateStore {
       for (const [sessionId, selected] of Object.entries(state.selections)) {
         state.selections[sessionId] = selected.filter(id => id !== knowledgeBaseId)
       }
+    })
+  }
+
+  async getFilters(sessionId: string): Promise<LiteratureFilters> {
+    return await this.#read(state => state.filters?.[sessionId] ?? {})
+  }
+
+  async setFilters(sessionId: string, filters: LiteratureFilters): Promise<void> {
+    await this.#mutate(state => {
+      state.filters ??= {}
+      state.filters[sessionId] = filters
     })
   }
 

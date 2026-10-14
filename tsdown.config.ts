@@ -11,7 +11,7 @@ const sharedClientModules = [
 
 export default defineConfig([
   {
-    name: '@kai232/dsh-rag',
+    name: '@cyx1874cyx/dsh-thrombus-rag',
     entry: { index: 'src/host/index.ts' },
     outDir: 'lib',
     format: 'esm',
@@ -24,7 +24,7 @@ export default defineConfig([
     deps: { neverBundle: [/^@deepseek-ai\//] },
   },
   {
-    name: '@kai232/dsh-rag/client',
+    name: '@cyx1874cyx/dsh-thrombus-rag/client',
     entry: { client: 'src/client/index.tsx' },
     outDir: 'lib',
     format: 'cjs',
@@ -41,7 +41,7 @@ export default defineConfig([
     },
     outputOptions: {
       entryFileNames: 'client.js',
-      banner: 'window.__ModuleLoader__.load({ id: "@kai232/dsh-rag", factory: (require) => {',
+      banner: 'window.__ModuleLoader__.load({ id: "@cyx1874cyx/dsh-thrombus-rag", factory: (require) => {',
       footer: 'return module.exports; } });',
       intro: 'var module = { exports: {} }; var exports = module.exports;',
     },

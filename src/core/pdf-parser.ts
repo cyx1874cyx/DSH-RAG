@@ -93,6 +93,8 @@ export async function parsePdfDocument(
     const document = await loadingTask.promise
     if (document.numPages > MAX_PAGES) throw new Error('PDF exceeds page limit')
     const blocks: StructuredBlock[] = []
+    const referencePages = new Set<number>()
+    let referencesStarted = false
     let totalChars = 0
     for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
       if (signalAborted(signal)) throw new DOMException('PDF parsing aborted', 'AbortError')
@@ -103,13 +105,16 @@ export async function parsePdfDocument(
         if (text.length > MAX_PAGE_TEXT_CHARS) throw new Error('PDF page text exceeds limit')
         totalChars += text.length
         if (totalChars > MAX_DOCUMENT_TEXT_CHARS) throw new Error('PDF document text exceeds limit')
-        blocks.push(...splitPage(text, pageNumber))
+        if (/^\s*(?:references|参考文献)\s*$/imu.test(text)) referencesStarted = true
+        if (/^\s*(?:appendix|supplementary (?:material|information)|supporting information)\s*$/imu.test(text)) referencesStarted = false
+        if (referencesStarted) referencePages.add(pageNumber)
+        blocks.push(...splitPage(text.replace(/([a-z])-\n\s*([a-z])/giu, '$1$2'), pageNumber))
       } finally {
         page.cleanup()
       }
     }
     if (blocks.length === 0) throw new Error('PDF contains no extractable text')
-    return buildStructuredChunks(documentId, knowledgeBaseName, relativePath, blocks)
+    return buildStructuredChunks(documentId, knowledgeBaseName, relativePath, blocks).map(chunk => ({ ...chunk, sectionKind: chunk.locator.kind === 'pdf' && referencePages.has(chunk.locator.page) ? 'references' as const : 'body' as const }))
   } catch (error) {
     if (signalAborted(signal)) throw new DOMException('PDF parsing aborted', 'AbortError')
     throw error

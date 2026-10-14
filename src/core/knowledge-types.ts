@@ -1,3 +1,5 @@
+import type { LiteratureMetadata } from './literature.ts'
+
 export interface TextSourceLocator {
   readonly kind: 'text'
   readonly lineStart: number
@@ -32,6 +34,7 @@ export interface KnowledgeChunk {
   readonly text: string
   readonly structuralContext: string
   readonly locator: SourceLocator
+  readonly sectionKind?: 'body' | 'references'
 }
 
 export interface KnowledgeDocument {
@@ -44,6 +47,7 @@ export interface KnowledgeDocument {
   readonly size: number
   readonly mtimeMs: number
   readonly chunks: readonly KnowledgeChunk[]
+  readonly literature?: LiteratureMetadata
 }
 
 export interface KnowledgeCatalog {
@@ -141,6 +145,8 @@ export interface SearchSource {
   readonly structuralContext: string
   readonly aiContext?: string
   readonly score: number
+  readonly literature?: LiteratureMetadata
+  readonly citationId?: string
 }
 
 export interface SearchResult {

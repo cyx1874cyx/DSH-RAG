@@ -1,14 +1,14 @@
 {
-  "name": "@kai232/dsh-rag",
-  "version": "0.1.2",
-  "description": "Local knowledge bases with explicit, source-backed retrieval for DeepSeek Harness Web.",
+  "name": "@cyx1874cyx/dsh-thrombus-rag",
+  "version": "0.2.1",
+  "description": "Source-grounded biomedical literature retrieval for DeepSeek Harness 0.2; local corpus, clinical evidence and page citations.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/imkelt/DSH-RAG.git"
+    "url": "git+https://github.com/cyx1874cyx/DSH-RAG.git"
   },
-  "homepage": "https://github.com/imkelt/DSH-RAG#readme",
+  "homepage": "https://github.com/cyx1874cyx/DSH-RAG#readme",
   "bugs": {
-    "url": "https://github.com/imkelt/DSH-RAG/issues"
+    "url": "https://github.com/cyx1874cyx/DSH-RAG/issues"
   },
   "license": "MIT",
   "type": "module",
@@ -45,7 +45,10 @@
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-input-trigger",
-        "@deepseek-ai/dsh-client-ui-tool"
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-chat",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session"
       ],
       "platform": "web"
     }
@@ -54,31 +57,39 @@
     "lint": "oxlint src tsdown.config.ts",
     "typecheck": "tsc -p tsconfig.host.json --noEmit && tsc -p tsconfig.client.json --noEmit && tsc -p tsconfig.tools.json --noEmit",
     "build": "tsdown && tsc -p tsconfig.host.build.json --emitDeclarationOnly && tsc -p tsconfig.client.build.json --emitDeclarationOnly",
-    "pack:check": "pnpm pack"
+    "pack:check": "pnpm pack",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
-  "packageManager": "pnpm@11.21.0",
+  "packageManager": "pnpm@11.25.0",
   "peerDependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-agent": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-locale": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-conversation": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-input-trigger": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-tool": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-commands": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-credentials": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-home-paths": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-llm": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-session": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-input-trigger": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-tool": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-store": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-workspace": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-chat": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2"
   },
   "dependencies": {
     "@napi-rs/keyring": "1.3.0",
@@ -87,22 +98,21 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-agent": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-locale": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-conversation": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-input-trigger": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-tool": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-commands": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-credentials": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-home-paths": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-llm": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-session": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.1.1-rc.2",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-agent": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-conversation": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-input-trigger": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-settings": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-tool": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-commands": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-credentials": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-home-paths": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
     "@types/node": "^24.10.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",
@@ -110,6 +120,15 @@
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "tsdown": "0.22.2",
-    "typescript": "6.0.3"
+    "typescript": "6.0.3",
+    "@deepseek-ai/dsh-client-connection": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-store": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-workspace": "0.2.0-rc.2",
+    "tsx": "^4.20.6",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-chat": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-workspace-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-api-session-controller": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-session": "0.2.0-rc.2"
   }
 }

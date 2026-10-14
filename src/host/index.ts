@@ -1,4 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { readFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
@@ -21,6 +23,13 @@ import { SiliconFlowProvider, type ProviderProbeResult, type ProviderProbeStatus
 import { prepareRuntimeStorage } from './storage-migration.ts'
 import { resolveRuntimeStorage } from './storage-path.ts'
 import { normalizeKnowledgeBaseIds } from './selection.ts'
+import { TOPIC_LABELS, SOURCE_ROLES, type LiteratureFilters } from '../core/literature.ts'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'thrombus-rag': { kind: 'thrombus-rag'; form: 'notice'; summary: string }
+  }
+}
 import { SessionStateStore } from './session-state-store.ts'
 
 export * from '../core/activation-gate.ts'
@@ -43,7 +52,7 @@ export * from './provider-credential.ts'
 export * from './provider-settings.ts'
 export * from './session-state-store.ts'
 
-export const name = '@kai232/dsh-rag'
+export const name = '@cyx1874cyx/dsh-thrombus-rag'
 export const inject = ['tools']
 
 const credential = credentialRef('SILICONFLOW_API_KEY')
@@ -126,11 +135,12 @@ export async function apply(ctx: Context): Promise<void> {
     providerHealth = { status, checkedAt: new Date().toISOString(), probe }
     return providerHealth
   }
-  const knowledge = new KnowledgeService(storagePath, {
+  const cloudRetrievalEnabled = process.env.DSH_RAG_CLOUD_RETRIEVAL === '1'
+  const knowledge = new KnowledgeService(storagePath, cloudRetrievalEnabled ? {
     embeddingProvider: provider,
     rerankProvider: provider,
     embeddingModel: initialProviderSettings.embeddingModel,
-  })
+  } : {})
 
   ctx.on('agent/pre-step', async ({ agent, messages, turn, signal }, next): Promise<PreStepDecision> => {
     const decision = await next()
@@ -175,8 +185,9 @@ export async function apply(ctx: Context): Promise<void> {
         const selectedNames = parsed.knowledgeBaseNames.length > 0
           ? parsed.knowledgeBaseNames
           : knowledgeBases.filter(item => selected.includes(item.id)).map(item => item.name)
-        const result = await knowledge.search(selected, question, 5, signal)
+        const result = await knowledge.search(selected, question, 8, signal, await sessionState.getFilters(String(agent.session.id)))
         signal.throwIfAborted()
+        if (result.sources.length === 0) return { kind: 'error', text: '当前范围没有检索到支持此问题的资料，请调整问题或筛选条件。' }
         const visibleCommand = `/rag ${selectedNames.map(formatKnowledgeBaseSelector).join('')}${question}`
         const message = freezeMessage({
           id: MessageId(String(commandId)),
@@ -192,7 +203,7 @@ export async function apply(ctx: Context): Promise<void> {
         })
         agent.inject(createUserMessage({
           content: [{ type: 'text', text: renderRetrievalContext(result, selectedNames) }],
-          source: { kind: 'plugin', plugin: 'dsh-rag' },
+          source: { kind: 'thrombus-rag', form: 'notice', summary: `文献检索返回 ${result.sources.length} 条来源` },
         }))
         activations.issue(agent, String(message.id), result)
         signal.throwIfAborted()
@@ -306,6 +317,61 @@ export async function apply(ctx: Context): Promise<void> {
         }
         const pathname = new URL(req.url ?? '/', `http://127.0.0.1:${routeCtx.webServer.port}`).pathname
         try {
+          if (pathname === '/dsh-rag/api/v1/storage/open' && req.method === 'POST') {
+            const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open'
+            const child = spawn(command, [storagePath], { stdio: 'ignore', windowsHide: false })
+            child.on('error', () => { /* The data path remains visible if the system file manager is unavailable. */ })
+            child.unref()
+            writeJson(res, 200, { ok: true })
+            return
+          }
+          const pdfMatch = /^\/dsh-rag\/api\/v1\/sources\/([^/]+)\/pdf$/u.exec(pathname)
+          if (pdfMatch !== null && req.method === 'GET') {
+            const filePath = await knowledge.resolveSource(decodeURIComponent(pdfMatch[1] ?? ''))
+            if (!filePath.toLowerCase().endsWith('.pdf')) throw new Error('该来源不是 PDF')
+            const pdf = await readFile(filePath)
+            res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': pdf.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'content-security-policy': "frame-ancestors 'self'" })
+            res.end(pdf)
+            return
+          }
+          const openMatch = /^\/dsh-rag\/api\/v1\/sources\/([^/]+)\/open$/u.exec(pathname)
+          if (openMatch !== null && req.method === 'POST') {
+            const filePath = await knowledge.resolveSource(decodeURIComponent(openMatch[1] ?? ''))
+            const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open'
+            const child = spawn(command, [filePath], { stdio: 'ignore', windowsHide: false })
+            child.on('error', () => {})
+            child.unref()
+            writeJson(res, 200, { ok: true })
+            return
+          }
+          const filtersMatch = /^\/dsh-rag\/api\/v1\/sessions\/([^/]+)\/filters$/u.exec(pathname)
+          if (filtersMatch !== null) {
+            const sessionId = decodeURIComponent(filtersMatch[1] ?? '')
+            if (routeCtx.sessions.get(SessionId(sessionId)) === undefined) throw new Error('session-not-found')
+            if (req.method === 'GET') {
+              writeJson(res, 200, { ok: true, filters: await sessionState.getFilters(sessionId) })
+              return
+            }
+            if (req.method === 'POST') {
+              const filters = z.object({ topics: z.array(z.string()).max(20).optional(), roles: z.array(z.enum(SOURCE_ROLES)).optional(), yearFrom: z.number().int().min(1800).max(2200).optional(), yearTo: z.number().int().min(1800).max(2200).optional() }).parse(await readJsonBody(req)) as LiteratureFilters
+              if (filters.yearFrom !== undefined && filters.yearTo !== undefined && filters.yearFrom > filters.yearTo) throw new Error('起始年份不能晚于结束年份')
+              await sessionState.setFilters(sessionId, filters)
+              writeJson(res, 200, { ok: true, filters })
+              return
+            }
+          }
+          if (pathname === '/dsh-rag/api/v1/search' && req.method === 'POST') {
+            const body = z.object({
+              knowledgeBaseIds: z.array(z.string()).min(1),
+              query: z.string().trim().min(1).max(1500),
+              limit: z.number().int().min(1).max(30).default(8),
+              filters: z.object({ topics: z.array(z.string()).max(20).optional(), roles: z.array(z.enum(SOURCE_ROLES)).optional(), yearFrom: z.number().int().min(1800).max(2200).optional(), yearTo: z.number().int().min(1800).max(2200).optional(), maxPerPaper: z.number().int().min(1).max(8).optional() }).optional(),
+            }).parse(await readJsonBody(req))
+            if (body.filters?.yearFrom !== undefined && body.filters.yearTo !== undefined && body.filters.yearFrom > body.filters.yearTo) throw new Error('起始年份不能晚于结束年份')
+            const result = await knowledge.search(body.knowledgeBaseIds, body.query, body.limit, undefined, body.filters as LiteratureFilters | undefined)
+            writeJson(res, 200, { ok: true, result, topics: TOPIC_LABELS })
+            return
+          }
           if (pathname === '/dsh-rag/api/v1/provider' && req.method === 'GET') {
             const settings = providerSettings.get()
             writeJson(res, 200, {
@@ -478,5 +544,5 @@ export async function apply(ctx: Context): Promise<void> {
     }), 'dsh-rag: M1 knowledge API')
   })
 
-  void refreshProviderHealth()
+  if (cloudRetrievalEnabled) void refreshProviderHealth()
 }

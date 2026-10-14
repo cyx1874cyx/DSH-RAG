@@ -20,3 +20,13 @@ indexes/
 models/
 .dsh-rag/
 .dsh-rag-public-*
+
+# Local literature and private runtime data
+corpus/
+artifacts/
+*.pdf
+*.docx
+*.pptx
+*.sqlite*
+*.npy
+*.credentials*

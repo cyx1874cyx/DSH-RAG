@@ -3,7 +3,12 @@
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "lib/types",
-    "tsBuildInfoFile": "lib/.tsbuildinfo/host"
+    "tsBuildInfoFile": "lib/.tsbuildinfo/host",
+    "noEmitOnError": true
   },
-  "include": ["src/core", "src/host"]
+  "include": [
+    "src/core",
+    "src/host",
+    "src/shared/**/*.ts"
+  ]
 }

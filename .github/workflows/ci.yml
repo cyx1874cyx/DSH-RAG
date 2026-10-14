@@ -24,7 +24,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 11.21.0
+          version: 11.25.0
 
       - uses: actions/setup-node@v4
         with:
@@ -34,6 +34,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm run typecheck
+      - run: pnpm test
       - run: pnpm run build
       - run: pnpm run pack:check
       - run: pnpm licenses list --prod --json
